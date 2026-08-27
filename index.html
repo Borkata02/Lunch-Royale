@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lunch Royale 🍔</title>
+  <!-- Tailwind CSS за бърз дизайн -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- PeerJS за Realtime Лоби без сървър -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex flex-col items-center justify-center p-4">
+
+  <div class="max-w-md w-full bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-700 text-center">
+    <h1 class="text-3xl font-black text-amber-400 mb-2">LUNCH ROYALE ⚔️</h1>
+    <p class="text-slate-400 text-sm mb-6">Битката за обяд в офиса</p>
+
+    <!-- ЕКРАН 1: ВХОД -->
+    <div id="screen-setup" class="space-y-4">
+      <input id="username" type="text" placeholder="Твоето име..." class="w-full p-3 rounded-xl bg-slate-700 border border-slate-600 focus:outline-none focus:border-amber-400 text-center font-bold">
+      
+      <div class="flex items-center justify-center space-x-2 py-2">
+        <input id="treat-mode" type="checkbox" class="w-5 h-5 accent-amber-400">
+        <label for="treat-mode" class="text-sm font-semibold text-amber-300">👑 Днес аз черпя (Treat Mode)</label>
+      </div>
+
+      <button onclick="createLobby()" class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl transition">Създай Лоби (Host)</button>
+      
+      <div class="relative flex py-2 items-center">
+        <div class="flex-grow border-t border-slate-700"></div>
+        <span class="flex-shrink mx-4 text-slate-500 text-xs">ИЛИ</span>
+        <div class="flex-grow border-t border-slate-700"></div>
+      </div>
+
+      <div class="flex space-x-2">
+        <input id="lobby-code-input" type="text" placeholder="КОД (напр. 1234)" class="w-1/2 p-3 rounded-xl bg-slate-700 border border-slate-600 text-center uppercase font-mono">
+        <button onclick="joinLobby()" class="w-1/2 py-3 bg-indigo-600 hover:bg-indigo-700 font-bold rounded-xl transition">Влез (Join)</button>
+      </div>
+    </div>
+
+    <!-- ЕКРАН 2: ЛОБИ -->
+    <div id="screen-lobby" class="hidden space-y-4">
+      <div class="bg-slate-700/50 p-3 rounded-xl border border-slate-600">
+        <span class="text-xs text-slate-400 block">КОД ЗА ВЛИЗАНЕ:</span>
+        <span id="display-code" class="text-2xl font-mono font-black text-amber-400 tracking-widest">----</span>
+      </div>
+
+      <div id="treat-banner" class="hidden bg-amber-500/20 text-amber-300 p-2 rounded-lg text-xs font-bold">
+        👑 Рожденикът черпи днес!
+      </div>
+
+      <div class="text-left">
+        <h3 class="text-xs font-bold text-slate-400 mb-2 uppercase">Колеги в лобито:</h3>
+        <ul id="players-list" class="space-y-2">
+          <!-- Играчите ще се появяват тук -->
+        </ul>
+      </div>
+
+      <button id="start-btn" onclick="startGame()" class="hidden w-full py-3 bg-green-500 hover:bg-green-600 text-slate-950 font-bold rounded-xl transition">ЗАПОЧНИ БИТКАТА 🚀</button>
+    </div>
+  </div>
+
+  <script>
+    let peer = null;
+    let connections = [];
+    let isHost = false;
+
+    // Създаване на лоби (Host)
+    function createLobby() {
+      const name = document.getElementById('username').value.trim();
+      if (!name) return alert('Въведи име!');
+
+      const code = Math.floor(1000 + Math.random() * 9000).toString();
+      peer = new Peer('lunch-' + code);
+
+      peer.on('open', (id) => {
+        isHost = true;
+        showLobby(code);
+        addPlayerToList(name, true);
+        document.getElementById('start-btn').classList.remove('hidden');
+      });
+
+      peer.on('connection', (conn) => {
+        connections.push(conn);
+        conn.on('data', (data) => {
+          if (data.type === 'JOIN') {
+            addPlayerToList(data.name, false);
+            broadcastPlayers();
+          }
+        });
+      });
+    }
+
+    // Влизане в лоби (Join)
+    function joinLobby() {
+      const name = document.getElementById('username').value.trim();
+      const code = document.getElementById('lobby-code-input').value.trim();
+      if (!name || !code) return alert('Попълни име и код!');
+
+      peer = new Peer();
+      peer.on('open', () => {
+        const conn = peer.connect('lunch-' + code);
+        conn.on('open', () => {
+          conn.send({ type: 'JOIN', name: name });
+          showLobby(code);
+        });
+        conn.on('data', (data) => {
+          if (data.type === 'PLAYER_LIST') {
+            updatePlayersUI(data.players);
+          }
+        });
+      });
+    }
+
+    function showLobby(code) {
+      document.getElementById('screen-setup').classList.add('hidden');
+      document.getElementById('screen-lobby').classList.remove('hidden');
+      document.getElementById('display-code').innerText = code;
+      if (document.getElementById('treat-mode').checked) {
+        document.getElementById('treat-banner').classList.remove('hidden');
+      }
+    }
+
+    let players = [];
+    function addPlayerToList(name, isHostPlayer) {
+      players.push({ name, isHost: isHostPlayer });
+      updatePlayersUI(players);
+    }
+
+    function updatePlayersUI(list) {
+      const ul = document.getElementById('players-list');
+      ul.innerHTML = list.map(p => `
+        <li class="bg-slate-700 p-2.5 rounded-lg text-sm font-semibold flex items-center justify-between">
+          <span>${p.name}</span>
+          ${p.isHost ? '<span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded">HOST</span>' : ''}
+        </li>
+      `).join('');
+    }
+
+    function broadcastPlayers() {
+      connections.forEach(c => c.send({ type: 'PLAYER_LIST', players: players }));
+    }
+  </script>
+</body>
+</html>
