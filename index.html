@@ -178,7 +178,7 @@
   <script>
     let peer = null, connections = [], isHost = false, myName = '', hostConn = null;
     let players = [], suggestions = [], selectedMode = 'vote', currentTurnIndex = 0;
-    let isTreatMode = false;
+    let isTreatMode = false, isGameStarted = false;
 
     // TCG ДАННИ
     let myCards = [];
@@ -274,13 +274,21 @@
     }
 
     function updatePlayersUI(list) {
-      document.getElementById('players-list').innerHTML = list.map(p => `
-        <li class="bg-slate-700 p-2 rounded-lg text-xs font-semibold flex items-center justify-between">
-          <span>${p.name}</span>
-          ${p.ready ? '<span class="text-[9px] bg-green-500/20 text-green-300 px-1.5 py-0.5 rounded border border-green-500/30">ГОТОВ</span>' : '<span class="text-[9px] bg-slate-600 text-slate-400 px-1.5 py-0.5 rounded">НАСТРОЙВА</span>'}
-          ${p.isHost ? '<span class="text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">HOST</span>' : ''}
-        </li>
-      `).join('');
+      document.getElementById('players-list').innerHTML = list.map(p => {
+        let statusBadge = '';
+        if (isGameStarted) {
+          statusBadge = p.ready 
+            ? '<span class="text-[9px] bg-green-500/20 text-green-300 px-1.5 py-0.5 rounded border border-green-500/30">ГОТОВ</span>' 
+            : '<span class="text-[9px] bg-slate-600 text-slate-400 px-1.5 py-0.5 rounded">НАСТРОЙВА</span>';
+        }
+        return `
+          <li class="bg-slate-700 p-2 rounded-lg text-xs font-semibold flex items-center justify-between">
+            <span>${p.name}</span>
+            ${statusBadge}
+            ${p.isHost ? '<span class="text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">HOST</span>' : ''}
+          </li>
+        `;
+      }).join('');
     }
 
     function updateTurnUI() {
@@ -325,6 +333,7 @@
 
     function startGame() {
       if (suggestions.length === 0) return showToast('Добавете карти!', '⚠️');
+      isGameStarted = true;
       broadcast({ type: 'START_GAME', options: suggestions, mode: selectedMode });
       renderGameUI(suggestions, selectedMode);
     }
@@ -370,6 +379,7 @@
       } else if (data.type === 'SUGGESTION_LIST') {
         suggestions = data.suggestions; if (data.turnIndex !== undefined) currentTurnIndex = data.turnIndex; updateSuggestionsUI(suggestions); updateTurnUI();
       } else if (data.type === 'START_GAME') {
+        isGameStarted = true;
         renderGameUI(data.options, data.mode);
       } else if (data.type === 'DICE_TURN_UPDATE') {
         diceQueue = data.diceQueue; diceResults = data.diceResults; updateDiceUI();
@@ -502,14 +512,13 @@
       }
       
       document.getElementById('game-title').innerText = '⏳ Очакване на другите...';
-      checkAllPlayersReadyUI();
+      renderWaitingScreen();
     }
 
-    function checkAllPlayersReadyUI() {
-      const allReady = players.every(p => p.ready);
+    function renderWaitingScreen() {
       const list = document.getElementById('options-list');
-
       if (isHost) {
+        const allReady = players.every(p => p.ready);
         list.innerHTML = `
           <button id="host-start-dice-btn" onclick="startDicePhase()" ${allReady ? '' : 'disabled'} 
             class="w-full py-3 font-black rounded-xl transition ${allReady ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 shadow-lg cursor-pointer animate-bounce' : 'bg-slate-700 text-slate-500 cursor-not-allowed opacity-50'}">
@@ -517,7 +526,23 @@
           </button>
         `;
       } else {
-        list.innerHTML = `<p class="text-xs text-slate-400">Чакайте Host-ът да стартира битката...</p>`;
+        list.innerHTML = `<p class="text-xs text-slate-400 py-4">Чакайте Host-ът да стартира битката...</p>`;
+      }
+    }
+
+    function checkAllPlayersReadyUI() {
+      if (!isHost) return;
+      const hostBtn = document.getElementById('host-start-dice-btn');
+      if (hostBtn) {
+        const allReady = players.every(p => p.ready);
+        hostBtn.disabled = !allReady;
+        if (allReady) {
+          hostBtn.className = 'w-full py-3 font-black rounded-xl transition bg-amber-500 hover:bg-amber-600 text-slate-950 shadow-lg cursor-pointer animate-bounce';
+          hostBtn.innerText = 'ПРЕМИНА КЪМ ЗАРЧЕ 🎲';
+        } else {
+          hostBtn.className = 'w-full py-3 font-black rounded-xl transition bg-slate-700 text-slate-500 cursor-not-allowed opacity-50';
+          hostBtn.innerText = 'Изчакване на колегите...';
+        }
       }
     }
 
@@ -723,7 +748,6 @@
         </div>
       `).join('');
 
-      // Премахваме използваната карта
       const myPlayedObj = playedCardsOnField.find(p => p.player === myName);
       if (myPlayedObj) myCards = myCards.filter(c => c.name !== myPlayedObj.card.name);
 
@@ -733,7 +757,6 @@
         showToast(`Картата ти "${survivingCard.name}" оцеля!`, '🛡️');
       }
 
-      // Синхронизираме броя оставащи карти към Хоста
       if (!isHost) hostConn.send({ type: 'UPDATE_MY_CARD_COUNT', player: myName, count: myCards.length });
       else {
         const p = players.find(x => x.name === myName);
@@ -746,11 +769,9 @@
       setTimeout(() => {
         document.getElementById('screen-round-result').classList.add('hidden');
 
-        // ПРОВЕРКА ЗА КРАЙ НА ИГРАТА (САМО 1 ИГРАЧ С КАРТИ)
         const playersWithCards = players.filter(p => p.cardCount > 0);
 
         if (playersWithCards.length === 1 && playersWithCards[0].name === myName) {
-          // ТИ СИ ПОБЕДИТЕЛЯТ С ОСТАНАЛИ КАРТИ
           checkFinalSelectionProcess();
         } else {
           showPopup(`⚔️ РУНД ${currentRound}`, 'Пригответе се за следващата карта!', '', 2000);
@@ -761,11 +782,9 @@
 
     function checkFinalSelectionProcess() {
       if (myCards.length === 1) {
-        // Останала е точно 1 карта
         if (isHost) broadcast({ type: 'DECLARE_WINNER', winner: myCards[0].name });
         declareWinner(myCards[0].name);
       } else if (myCards.length > 1) {
-        // Играчът има повече от 1 карта и сам избира коя да премахне
         renderDiscardSelectionUI();
       }
     }
