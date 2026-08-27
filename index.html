@@ -4,9 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Lunch Royale 🍔</title>
-  <!-- Tailwind CSS за бърз дизайн -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- PeerJS за Realtime Лоби без сървър -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body class="bg-slate-900 text-white min-h-screen flex flex-col items-center justify-center p-4">
@@ -51,64 +49,77 @@
 
       <div class="text-left">
         <h3 class="text-xs font-bold text-slate-400 mb-2 uppercase">Колеги в лобито:</h3>
-        <ul id="players-list" class="space-y-2">
-          <!-- Играчите ще се появяват тук -->
-        </ul>
+        <ul id="players-list" class="space-y-2"></ul>
       </div>
 
-      <button id="start-btn" onclick="startGame()" class="hidden w-full py-3 bg-green-500 hover:bg-green-600 text-slate-950 font-bold rounded-xl transition">ЗАПОЧНИ БИТКАТА 🚀</button>
+      <!-- ВЪВЕЖДАНЕ НА ПРЕДЛОЖЕНИЕ -->
+      <div class="space-y-2 pt-2 border-t border-slate-700">
+        <input id="suggestion-input" type="text" placeholder="Предложи място (напр. Дюнери)" class="w-full p-2.5 rounded-lg bg-slate-700 border border-slate-600 text-sm">
+        <button onclick="submitSuggestion()" class="w-full py-2 bg-slate-600 hover:bg-slate-500 text-xs font-bold rounded-lg transition">Добави място</button>
+      </div>
+
+      <button id="start-btn" onclick="startGame()" class="hidden w-full py-3 bg-green-500 hover:bg-green-600 text-slate-950 font-bold rounded-xl transition">ЗАПОЧНИ ГЛАСУВАНЕТО 🚀</button>
     </div>
+
+    <!-- ЕКРАН 3: ГЛАСУВАНЕ -->
+    <div id="screen-game" class="hidden space-y-4">
+      <h2 class="text-xl font-bold text-amber-400">Изберете какво ви се яде:</h2>
+      <div id="options-list" class="space-y-2"></div>
+    </div>
+
+    <!-- ЕКРАН 4: ПОБЕДИТЕЛ -->
+    <div id="screen-winner" class="hidden space-y-4 py-6">
+      <span class="text-5xl block animate-bounce">🏆</span>
+      <h2 class="text-sm font-bold text-slate-400 uppercase">Днешният победител е:</h2>
+      <div id="winner-name" class="text-3xl font-black text-amber-400 tracking-wide">...</div>
+    </div>
+
   </div>
 
   <script>
     let peer = null;
     let connections = [];
     let isHost = false;
+    let myName = '';
+    let hostConn = null;
 
-    // Създаване на лоби (Host)
+    let players = [];
+    let suggestions = [];
+    let votes = {};
+
     function createLobby() {
-      const name = document.getElementById('username').value.trim();
-      if (!name) return alert('Въведи име!');
+      myName = document.getElementById('username').value.trim();
+      if (!myName) return alert('Въведи име!');
 
       const code = Math.floor(1000 + Math.random() * 9000).toString();
       peer = new Peer('lunch-' + code);
 
-      peer.on('open', (id) => {
+      peer.on('open', () => {
         isHost = true;
         showLobby(code);
-        addPlayerToList(name, true);
+        addPlayerToList(myName, true);
         document.getElementById('start-btn').classList.remove('hidden');
       });
 
       peer.on('connection', (conn) => {
         connections.push(conn);
-        conn.on('data', (data) => {
-          if (data.type === 'JOIN') {
-            addPlayerToList(data.name, false);
-            broadcastPlayers();
-          }
-        });
+        conn.on('data', (data) => handleHostData(data, conn));
       });
     }
 
-    // Влизане в лоби (Join)
     function joinLobby() {
-      const name = document.getElementById('username').value.trim();
+      myName = document.getElementById('username').value.trim();
       const code = document.getElementById('lobby-code-input').value.trim();
-      if (!name || !code) return alert('Попълни име и код!');
+      if (!myName || !code) return alert('Попълни име и код!');
 
       peer = new Peer();
       peer.on('open', () => {
-        const conn = peer.connect('lunch-' + code);
-        conn.on('open', () => {
-          conn.send({ type: 'JOIN', name: name });
+        hostConn = peer.connect('lunch-' + code);
+        hostConn.on('open', () => {
+          hostConn.send({ type: 'JOIN', name: myName });
           showLobby(code);
         });
-        conn.on('data', (data) => {
-          if (data.type === 'PLAYER_LIST') {
-            updatePlayersUI(data.players);
-          }
-        });
+        hostConn.on('data', handleClientData);
       });
     }
 
@@ -121,7 +132,6 @@
       }
     }
 
-    let players = [];
     function addPlayerToList(name, isHostPlayer) {
       players.push({ name, isHost: isHostPlayer });
       updatePlayersUI(players);
@@ -137,8 +147,86 @@
       `).join('');
     }
 
-    function broadcastPlayers() {
-      connections.forEach(c => c.send({ type: 'PLAYER_LIST', players: players }));
+    function submitSuggestion() {
+      const input = document.getElementById('suggestion-input');
+      const val = input.value.trim();
+      if (!val) return;
+
+      if (isHost) {
+        if (!suggestions.includes(val)) suggestions.push(val);
+      } else {
+        hostConn.send({ type: 'SUGGESTION', value: val });
+      }
+      input.value = '';
+      alert('Добавено предложение!');
+    }
+
+    function startGame() {
+      if (suggestions.length === 0) return alert('Добавете поне 1 предложение!');
+      broadcast({ type: 'START_GAME', options: suggestions });
+      renderGameUI(suggestions);
+    }
+
+    function vote(option) {
+      if (isHost) {
+        votes[myName] = option;
+        checkVotes();
+      } else {
+        hostConn.send({ type: 'VOTE', option, player: myName });
+        document.getElementById('screen-game').innerHTML = '<p class="text-amber-400 font-bold">Гласът е записан! Чакаме останалите...</p>';
+      }
+    }
+
+    // ЛОГИКА НА ХОСТА
+    function handleHostData(data, conn) {
+      if (data.type === 'JOIN') {
+        addPlayerToList(data.name, false);
+        broadcast({ type: 'PLAYER_LIST', players });
+      } else if (data.type === 'SUGGESTION') {
+        if (!suggestions.includes(data.value)) suggestions.push(data.value);
+      } else if (data.type === 'VOTE') {
+        votes[data.player] = data.option;
+        checkVotes();
+      }
+    }
+
+    function checkVotes() {
+      if (Object.keys(votes).length >= players.length) {
+        // Преброяване
+        const counts = {};
+        Object.values(votes).forEach(opt => counts[opt] = (counts[opt] || 0) + 1);
+        
+        let winner = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
+        broadcast({ type: 'WINNER', winner });
+        renderWinner(winner);
+      }
+    }
+
+    // ЛОГИКА НА КЛИЕНТА
+    function handleClientData(data) {
+      if (data.type === 'PLAYER_LIST') updatePlayersUI(data.players);
+      else if (data.type === 'START_GAME') renderGameUI(data.options);
+      else if (data.type === 'WINNER') renderWinner(data.winner);
+    }
+
+    function broadcast(data) {
+      connections.forEach(c => c.send(data));
+    }
+
+    function renderGameUI(options) {
+      document.getElementById('screen-lobby').classList.add('hidden');
+      document.getElementById('screen-game').classList.remove('hidden');
+      
+      const list = document.getElementById('options-list');
+      list.innerHTML = options.map(opt => `
+        <button onclick="vote('${opt}')" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 font-bold rounded-xl transition">${opt}</button>
+      `).join('');
+    }
+
+    function renderWinner(winner) {
+      document.getElementById('screen-game').classList.add('hidden');
+      document.getElementById('screen-winner').classList.remove('hidden');
+      document.getElementById('winner-name').innerText = winner;
     }
   </script>
 </body>
