@@ -6,8 +6,18 @@
   <title>Lunch Royale 🍔</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    @keyframes slideUp {
+      from { transform: translateY(100%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .toast-anim { animation: slideUp 0.3s ease-out forwards; }
+  </style>
 </head>
 <body class="bg-slate-900 text-white min-h-screen flex flex-col items-center justify-center p-4">
+
+  <!-- TOAST ПОП-ЪП ИЗВЕСТИЕ -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
 
   <div class="max-w-md w-full bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-700 text-center">
     <h1 class="text-3xl font-black text-amber-400 mb-2">LUNCH ROYALE ⚔️</h1>
@@ -38,13 +48,30 @@
 
     <!-- ЕКРАН 2: ЛОБИ -->
     <div id="screen-lobby" class="hidden space-y-4">
-      <div class="bg-slate-700/50 p-3 rounded-xl border border-slate-600">
-        <span class="text-xs text-slate-400 block">КОД ЗА ВЛИЗАНЕ:</span>
-        <span id="display-code" class="text-2xl font-mono font-black text-amber-400 tracking-widest">----</span>
+      <div class="bg-slate-700/50 p-3 rounded-xl border border-slate-600 flex justify-between items-center">
+        <div>
+          <span class="text-xs text-slate-400 block text-left">КОД ЗА ВЛИЗАНЕ:</span>
+          <span id="display-code" class="text-2xl font-mono font-black text-amber-400 tracking-widest">----</span>
+        </div>
+        <div id="treat-banner" class="hidden bg-amber-500/20 text-amber-300 px-3 py-1 rounded-lg text-xs font-bold border border-amber-500/30">
+          👑 Черпят ни!
+        </div>
       </div>
 
-      <div id="treat-banner" class="hidden bg-amber-500/20 text-amber-300 p-2 rounded-lg text-xs font-bold">
-        👑 Рожденикът черпи днес!
+      <!-- ИЗБОР НА ГЕЙМ МОД (ВИДИМ ЗА ВСИЧКИ, НО САМО ХОСТА КЛИКА) -->
+      <div class="text-left space-y-1">
+        <label class="text-xs font-bold text-slate-400 uppercase">Изберете режим на битка:</label>
+        <div class="grid grid-cols-3 gap-2">
+          <button id="mode-vote" onclick="selectGameMode('vote')" class="mode-btn p-2 rounded-xl bg-slate-700 border-2 border-amber-400 text-xs font-bold text-center transition">
+            🗳️ Гласуване
+          </button>
+          <button id="mode-wheel" onclick="selectGameMode('wheel')" class="mode-btn p-2 rounded-xl bg-slate-700 border-2 border-transparent text-xs font-bold text-center transition">
+            🎡 Колело
+          </button>
+          <button id="mode-tournament" onclick="selectGameMode('tournament')" class="mode-btn p-2 rounded-xl bg-slate-700 border-2 border-transparent text-xs font-bold text-center transition">
+            ⚔️ Турнир
+          </button>
+        </div>
       </div>
 
       <div class="text-left">
@@ -52,18 +79,25 @@
         <ul id="players-list" class="space-y-2"></ul>
       </div>
 
-      <!-- ВЪВЕЖДАНЕ НА ПРЕДЛОЖЕНИЕ -->
-      <div class="space-y-2 pt-2 border-t border-slate-700">
-        <input id="suggestion-input" type="text" placeholder="Предложи място (напр. Дюнери)" class="w-full p-2.5 rounded-lg bg-slate-700 border border-slate-600 text-sm">
-        <button onclick="submitSuggestion()" class="w-full py-2 bg-slate-600 hover:bg-slate-500 text-xs font-bold rounded-lg transition">Добави място</button>
+      <!-- ВЪВЕЖДАНЕ И СПИСЪК НА ПРЕДЛОЖЕНИЯТА -->
+      <div class="space-y-2 pt-2 border-t border-slate-700 text-left">
+        <label class="text-xs font-bold text-slate-400 uppercase">Предложения за обяд:</label>
+        <div class="flex space-x-2">
+          <input id="suggestion-input" type="text" placeholder="напр. Дюнери, Суши..." class="flex-1 p-2.5 rounded-lg bg-slate-700 border border-slate-600 text-sm focus:outline-none focus:border-amber-400">
+          <button onclick="submitSuggestion()" class="px-4 bg-slate-600 hover:bg-slate-500 text-xs font-bold rounded-lg transition">Добави</button>
+        </div>
+        <!-- СПИСЪК С ЧИПОВЕ -->
+        <div id="suggestions-container" class="flex flex-wrap gap-1.5 pt-1 min-h-[30px]">
+          <span class="text-xs text-slate-500 italic">Все още няма добавени места...</span>
+        </div>
       </div>
 
-      <button id="start-btn" onclick="startGame()" class="hidden w-full py-3 bg-green-500 hover:bg-green-600 text-slate-950 font-bold rounded-xl transition">ЗАПОЧНИ ГЛАСУВАНЕТО 🚀</button>
+      <button id="start-btn" onclick="startGame()" class="hidden w-full py-3 bg-green-500 hover:bg-green-600 text-slate-950 font-bold rounded-xl transition">ЗАПОЧНИ БИТКАТА 🚀</button>
     </div>
 
     <!-- ЕКРАН 3: ГЛАСУВАНЕ -->
     <div id="screen-game" class="hidden space-y-4">
-      <h2 class="text-xl font-bold text-amber-400">Изберете какво ви се яде:</h2>
+      <h2 id="game-title" class="text-xl font-bold text-amber-400">Изберете какво ви се яде:</h2>
       <div id="options-list" class="space-y-2"></div>
     </div>
 
@@ -86,10 +120,26 @@
     let players = [];
     let suggestions = [];
     let votes = {};
+    let selectedMode = 'vote'; // 'vote', 'wheel', 'tournament'
+
+    // ПОП-ЪП ИЗВЕСТИЯ (TOASTS)
+    function showToast(message, icon = '✨') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = 'toast-anim bg-slate-800 text-white border border-slate-700 shadow-2xl px-4 py-3 rounded-xl flex items-center space-x-2 text-sm font-bold';
+      toast.innerHTML = `<span>${icon}</span><span>${message}</span>`;
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
 
     function createLobby() {
       myName = document.getElementById('username').value.trim();
-      if (!myName) return alert('Въведи име!');
+      if (!myName) return showToast('Въведи име!', '⚠️');
 
       const code = Math.floor(1000 + Math.random() * 9000).toString();
       peer = new Peer('lunch-' + code);
@@ -99,6 +149,7 @@
         showLobby(code);
         addPlayerToList(myName, true);
         document.getElementById('start-btn').classList.remove('hidden');
+        showToast('Лобито е създадено!', '🎉');
       });
 
       peer.on('connection', (conn) => {
@@ -110,7 +161,7 @@
     function joinLobby() {
       myName = document.getElementById('username').value.trim();
       const code = document.getElementById('lobby-code-input').value.trim();
-      if (!myName || !code) return alert('Попълни име и код!');
+      if (!myName || !code) return showToast('Попълни име и код!', '⚠️');
 
       peer = new Peer();
       peer.on('open', () => {
@@ -118,6 +169,7 @@
         hostConn.on('open', () => {
           hostConn.send({ type: 'JOIN', name: myName });
           showLobby(code);
+          showToast('Успешно влезе в лобито!', '👋');
         });
         hostConn.on('data', handleClientData);
       });
@@ -132,6 +184,22 @@
       }
     }
 
+    function selectGameMode(mode) {
+      if (!isHost) {
+        showToast('Само Хостът може да сменя режима!', '🔒');
+        return;
+      }
+      selectedMode = mode;
+      updateGameModeUI(mode);
+      broadcast({ type: 'MODE_CHANGE', mode: mode });
+    }
+
+    function updateGameModeUI(mode) {
+      selectedMode = mode;
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.replace('border-amber-400', 'border-transparent'));
+      document.getElementById('mode-' + mode).classList.replace('border-transparent', 'border-amber-400');
+    }
+
     function addPlayerToList(name, isHostPlayer) {
       players.push({ name, isHost: isHostPlayer });
       updatePlayersUI(players);
@@ -142,7 +210,7 @@
       ul.innerHTML = list.map(p => `
         <li class="bg-slate-700 p-2.5 rounded-lg text-sm font-semibold flex items-center justify-between">
           <span>${p.name}</span>
-          ${p.isHost ? '<span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded">HOST</span>' : ''}
+          ${p.isHost ? '<span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">HOST</span>' : ''}
         </li>
       `).join('');
     }
@@ -153,18 +221,39 @@
       if (!val) return;
 
       if (isHost) {
-        if (!suggestions.includes(val)) suggestions.push(val);
+        addSuggestion(val, myName);
       } else {
-        hostConn.send({ type: 'SUGGESTION', value: val });
+        hostConn.send({ type: 'SUGGESTION', value: val, author: myName });
       }
       input.value = '';
-      alert('Добавено предложение!');
+    }
+
+    function addSuggestion(val, author) {
+      if (!suggestions.includes(val)) {
+        suggestions.push(val);
+        updateSuggestionsUI(suggestions);
+        broadcast({ type: 'SUGGESTION_LIST', suggestions: suggestions, addedBy: author, newItem: val });
+        showToast(`${author} добави: "${val}"`, '🍔');
+      }
+    }
+
+    function updateSuggestionsUI(list) {
+      const container = document.getElementById('suggestions-container');
+      if (list.length === 0) {
+        container.innerHTML = `<span class="text-xs text-slate-500 italic">Все още няма добавени места...</span>`;
+        return;
+      }
+      container.innerHTML = list.map(s => `
+        <span class="bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 px-2.5 py-1 rounded-lg text-xs font-bold animate-fade-in flex items-center gap-1">
+          📍 ${s}
+        </span>
+      `).join('');
     }
 
     function startGame() {
-      if (suggestions.length === 0) return alert('Добавете поне 1 предложение!');
-      broadcast({ type: 'START_GAME', options: suggestions });
-      renderGameUI(suggestions);
+      if (suggestions.length === 0) return showToast('Добавете поне 1 място!', '⚠️');
+      broadcast({ type: 'START_GAME', options: suggestions, mode: selectedMode });
+      renderGameUI(suggestions, selectedMode);
     }
 
     function vote(option) {
@@ -173,8 +262,9 @@
         checkVotes();
       } else {
         hostConn.send({ type: 'VOTE', option, player: myName });
-        document.getElementById('screen-game').innerHTML = '<p class="text-amber-400 font-bold">Гласът е записан! Чакаме останалите...</p>';
+        document.getElementById('screen-game').innerHTML = '<p class="text-amber-400 font-bold p-6">Гласът е записан! Чакаме останалите...</p>';
       }
+      showToast(`Гласува за "${option}"`, '✅');
     }
 
     // ЛОГИКА НА ХОСТА
@@ -182,8 +272,9 @@
       if (data.type === 'JOIN') {
         addPlayerToList(data.name, false);
         broadcast({ type: 'PLAYER_LIST', players });
+        showToast(`${data.name} се присъедини!`, '👋');
       } else if (data.type === 'SUGGESTION') {
-        if (!suggestions.includes(data.value)) suggestions.push(data.value);
+        addSuggestion(data.value, data.author);
       } else if (data.type === 'VOTE') {
         votes[data.player] = data.option;
         checkVotes();
@@ -192,7 +283,6 @@
 
     function checkVotes() {
       if (Object.keys(votes).length >= players.length) {
-        // Преброяване
         const counts = {};
         Object.values(votes).forEach(opt => counts[opt] = (counts[opt] || 0) + 1);
         
@@ -204,23 +294,50 @@
 
     // ЛОГИКА НА КЛИЕНТА
     function handleClientData(data) {
-      if (data.type === 'PLAYER_LIST') updatePlayersUI(data.players);
-      else if (data.type === 'START_GAME') renderGameUI(data.options);
-      else if (data.type === 'WINNER') renderWinner(data.winner);
+      if (data.type === 'PLAYER_LIST') {
+        updatePlayersUI(data.players);
+      } else if (data.type === 'MODE_CHANGE') {
+        updateGameModeUI(data.mode);
+        showToast(`Хостът избра режим: ${data.mode}`, '🎮');
+      } else if (data.type === 'SUGGESTION_LIST') {
+        suggestions = data.suggestions;
+        updateSuggestionsUI(suggestions);
+        if (data.newItem) showToast(`${data.addedBy} добави: "${data.newItem}"`, '🍔');
+      } else if (data.type === 'START_GAME') {
+        renderGameUI(data.options, data.mode);
+      } else if (data.type === 'WINNER') {
+        renderWinner(data.winner);
+      }
     }
 
     function broadcast(data) {
       connections.forEach(c => c.send(data));
     }
 
-    function renderGameUI(options) {
+    function renderGameUI(options, mode) {
       document.getElementById('screen-lobby').classList.add('hidden');
       document.getElementById('screen-game').classList.remove('hidden');
       
       const list = document.getElementById('options-list');
-      list.innerHTML = options.map(opt => `
-        <button onclick="vote('${opt}')" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 font-bold rounded-xl transition">${opt}</button>
-      `).join('');
+
+      if (mode === 'wheel') {
+        // Колело - теглене на произволен победител (за MVP)
+        document.getElementById('game-title').innerText = '🎡 Колелото се върти...';
+        list.innerHTML = `<div class="p-8 text-2xl font-bold text-amber-400 animate-pulse">Завъртане...</div>`;
+        if (isHost) {
+          setTimeout(() => {
+            const randomWinner = options[Math.floor(Math.random() * options.length)];
+            broadcast({ type: 'WINNER', winner: randomWinner });
+            renderWinner(randomWinner);
+          }, 3000);
+        }
+      } else {
+        // Стандартно гласуване
+        document.getElementById('game-title').innerText = 'Изберете какво ви се яде:';
+        list.innerHTML = options.map(opt => `
+          <button onclick="vote('${opt}')" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 font-bold rounded-xl transition">${opt}</button>
+        `).join('');
+      }
     }
 
     function renderWinner(winner) {
