@@ -13,11 +13,22 @@
     .card-anim { animation: cardPlace 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
     @keyframes spinWheel { 0% { transform: rotate(0deg); } 100% { transform: rotate(1440deg); } }
     .wheel-spinning { animation: spinWheel 3s cubic-bezier(0.15, 0.9, 0.2, 1) forwards; }
+    @keyframes popIn { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+    .pop-anim { animation: popIn 0.3s ease-out forwards; }
   </style>
 </head>
 <body class="bg-slate-900 text-white min-h-screen flex flex-col items-center justify-center p-4 select-none">
 
   <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
+
+  <!-- POP-UP OVERLAY ЗА СЪОБЩЕНИЯ -->
+  <div id="popup-overlay" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-800 border-2 border-amber-400 p-6 rounded-2xl text-center max-w-sm w-full pop-anim shadow-2xl">
+      <h3 id="popup-title" class="text-2xl font-black text-amber-400 mb-2">...</h3>
+      <p id="popup-body" class="text-sm text-slate-300 font-semibold mb-4">...</p>
+      <div id="popup-sub" class="text-xs text-amber-300/80 font-mono"></div>
+    </div>
+  </div>
 
   <div class="max-w-md w-full bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-700 text-center relative overflow-hidden">
     <h1 class="text-3xl font-black text-amber-400 mb-1">LUNCH ROYALE ⚔️</h1>
@@ -89,13 +100,13 @@
       <button id="start-btn" onclick="startGame()" class="hidden w-full py-3 bg-green-500 hover:bg-green-600 text-slate-950 font-black rounded-xl transition shadow-lg">СТАРТ НА ИГРАТА 🚀</button>
     </div>
 
-    <!-- ЕКРАН 3: ГЛАСУВАНЕ / КОЛЕЛО / НАСТРОЙКА НА ТОЧКИ -->
+    <!-- ЕКРАН 3: НАСТРОЙКА НА ТОЧКИ СЪС СЛАЙДЕРИ -->
     <div id="screen-game" class="hidden space-y-4">
-      <h2 id="game-title" class="text-xl font-bold text-amber-400">Изберете вариант</h2>
+      <h2 id="game-title" class="text-xl font-bold text-amber-400">Настройка</h2>
       <div id="options-list" class="space-y-2"></div>
     </div>
 
-    <!-- ЕКРАН 4: ВЪРТЕНЕ НА ЗАРЧЕ (DICE PHASE ЗА ТУРНИРА) -->
+    <!-- ЕКРАН 4: ВЪРТЕНЕ НА ЗАРЧЕ -->
     <div id="screen-dice" class="hidden space-y-4 py-2">
       <div class="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-xl text-amber-300 font-bold text-xs">
         🎲 ОПРЕДЕЛЯНЕ НА РЕД ЧРЕЗ ЗАР
@@ -122,7 +133,7 @@
       </div>
 
       <!-- БОЙНО ПОЛЕ -->
-      <div class="bg-slate-900/80 rounded-xl p-3 border border-slate-700 min-h-[150px] flex flex-col justify-center items-center">
+      <div class="bg-slate-900/80 rounded-xl p-3 border border-slate-700 min-h-[140px] flex flex-col justify-center items-center">
         <span class="text-[10px] font-bold text-slate-500 uppercase mb-2">⚔️ Арена на сблъсъка</span>
         <div id="field-cards" class="flex gap-2 justify-center w-full min-h-[90px] items-center flex-wrap">
           <span id="empty-field-msg" class="text-xs text-slate-600 italic">Очакване за поставяне на карти...</span>
@@ -139,7 +150,14 @@
       </div>
     </div>
 
-    <!-- ЕКРАН 6: ПОБЕДИТЕЛ -->
+    <!-- ЕКРАН 6: РЕЗУЛТАТ ОТ РУНДА (ЛОГ) -->
+    <div id="screen-round-result" class="hidden space-y-4 py-4">
+      <h2 class="text-lg font-black text-amber-400">📊 РЕЗУЛТАТ ОТ СБЛЪСЪКА</h2>
+      <div id="battle-log-container" class="bg-slate-900/90 p-4 rounded-xl border border-slate-700 text-left text-xs space-y-2 max-h-[220px] overflow-y-auto"></div>
+      <p class="text-[11px] text-slate-400 animate-pulse">Следващ рунд след малко...</p>
+    </div>
+
+    <!-- ЕКРАН 7: ПОБЕДИТЕЛ -->
     <div id="screen-winner" class="hidden space-y-4 py-6">
       <span class="text-5xl block animate-bounce">🏆</span>
       <h2 class="text-xs font-bold text-slate-400 uppercase">Днешният победител за обяд е:</h2>
@@ -156,7 +174,7 @@
 
     // TCG ДАННИ
     let myCards = [];
-    let activeCardIndex = 0, currentMaxPoints = 20, remainingPoints = 20;
+    let activeCardIndex = 0, currentMaxPoints = 20;
     let cardStats = { taste: 0, speed: 0, value: 0 };
     
     // ЗАР & БИТКА
@@ -170,6 +188,15 @@
       toast.innerHTML = `<span>${icon}</span><span>${msg}</span>`;
       container.appendChild(toast);
       setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
+    }
+
+    function showPopup(title, body, sub = '', duration = 3000) {
+      const overlay = document.getElementById('popup-overlay');
+      document.getElementById('popup-title').innerText = title;
+      document.getElementById('popup-body').innerText = body;
+      document.getElementById('popup-sub').innerText = sub;
+      overlay.classList.remove('hidden');
+      setTimeout(() => { overlay.classList.add('hidden'); }, duration);
     }
 
     function createLobby() {
@@ -330,16 +357,18 @@
         renderGameUI(data.options, data.mode);
       } else if (data.type === 'DICE_TURN_UPDATE') {
         diceQueue = data.diceQueue; diceResults = data.diceResults; updateDiceUI();
+      } else if (data.type === 'SHOW_DICE_FINISHED_POPUP') {
+        showPopup('🎲 РЕЗУЛТАТИ ОТ ЗАРЧЕТАТА', data.summary, 'Играта започва след малко...', 3500);
       } else if (data.type === 'INIT_BATTLE') {
-        turnOrder = data.turnOrder; battleTurnIdx = 0; initArenaUI();
+        turnOrder = data.turnOrder; battleTurnIdx = 0;
+        setTimeout(() => { showPopup('⚔️ БИТКАТА ЗАПОЧВА!', 'Подгответе картите си!', 'Рунд 1', 2500); initArenaUI(); }, 3500);
       } else if (data.type === 'UPDATE_FIELD') {
         playedCardsOnField = data.fieldCards; battleTurnIdx = data.nextTurnIdx; updateArenaUI();
       } else if (data.type === 'RESOLVE_ROUND') {
-        handleRoundResolution(data.winner, data.survivingCard, data.nextTurnIdx, data.newRound);
+        handleRoundResolution(data.winner, data.survivingCard, data.nextTurnIdx, data.newRound, data.logs, data.finalWinner);
       }
     }
 
-    // ЛОГИКА И ЕКРАНИ
     function renderGameUI(options, mode) {
       document.getElementById('screen-lobby').classList.add('hidden');
       document.getElementById('screen-game').classList.remove('hidden');
@@ -362,6 +391,10 @@
       } else if (mode === 'tournament') {
         const authored = options.filter(s => s.author === myName);
         const cardsToUse = authored.length > 0 ? authored : options;
+        
+        // ДИНАМИЧНО ИЗЧИСЛЯВАНЕ НА БЮДЖЕТА ТОЧКИ (40 точки общо за играч)
+        currentMaxPoints = Math.floor(40 / cardsToUse.length);
+
         myCards = cardsToUse.map(s => ({ name: s.text, stats: { taste: 0, speed: 0, value: 0 } }));
         activeCardIndex = 0;
         renderCardSetup();
@@ -375,35 +408,69 @@
       setTimeout(() => { declareWinner(winner); }, 3000);
     }
 
+    // СЛАЙДЕРИ ЗА НАСТРОЙКА НА КАРТА
     function renderCardSetup() {
       if (activeCardIndex >= myCards.length) {
         setPlayerReady();
         return;
       }
       const card = myCards[activeCardIndex];
-      currentMaxPoints = 20; remainingPoints = 20; cardStats = { taste: 0, speed: 0, value: 0 };
+      cardStats = { taste: 0, speed: 0, value: 0 };
 
-      document.getElementById('game-title').innerText = `🃏 Настройка: ${card.name}`;
+      document.getElementById('game-title').innerText = `🃏 Настройка (${activeCardIndex + 1}/${myCards.length}): ${card.name}`;
       document.getElementById('options-list').innerHTML = `
         <div class="bg-slate-700/60 p-4 rounded-xl border border-amber-400/30 text-left space-y-3">
-          <div class="flex justify-between items-center"><span class="text-xs font-bold text-amber-300">Остават:</span><span id="pts-left" class="text-sm font-black text-amber-400">20</span></div>
-          <div><label class="text-xs">🍔 Вкус:</label> <input type="number" min="0" max="20" value="0" onchange="updateStatInput('taste', this.value)" class="w-full p-2 bg-slate-800 rounded text-amber-400 font-bold"></div>
-          <div><label class="text-xs">⏱️ Бързина:</label> <input type="number" min="0" max="20" value="0" onchange="updateStatInput('speed', this.value)" class="w-full p-2 bg-slate-800 rounded text-amber-400 font-bold"></div>
-          <div><label class="text-xs">💰 Изгодна цена:</label> <input type="number" min="0" max="20" value="0" onchange="updateStatInput('value', this.value)" class="w-full p-2 bg-slate-800 rounded text-amber-400 font-bold"></div>
-          <button onclick="confirmCard()" class="w-full py-2 bg-amber-500 text-slate-950 font-bold rounded-lg mt-2">Запази картата</button>
+          <div class="flex justify-between items-center">
+            <span class="text-xs font-bold text-amber-300">Бюджет за тази карта:</span>
+            <span class="text-sm font-black text-amber-400"><span id="pts-used">0</span> / ${currentMaxPoints} т.</span>
+          </div>
+          
+          <div>
+            <div class="flex justify-between text-xs mb-1"><span>🍔 Вкус:</span><b id="val-taste" class="text-amber-400">0</b></div>
+            <input type="range" id="slider-taste" min="0" max="${currentMaxPoints}" value="0" oninput="updateSliders('taste')" class="w-full accent-amber-400 cursor-pointer">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-xs mb-1"><span>⏱️ Бързина:</span><b id="val-speed" class="text-amber-400">0</b></div>
+            <input type="range" id="slider-speed" min="0" max="${currentMaxPoints}" value="0" oninput="updateSliders('speed')" class="w-full accent-amber-400 cursor-pointer">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-xs mb-1"><span>💰 Изгодност:</span><b id="val-value" class="text-amber-400">0</b></div>
+            <input type="range" id="slider-value" min="0" max="${currentMaxPoints}" value="0" oninput="updateSliders('value')" class="w-full accent-amber-400 cursor-pointer">
+          </div>
+
+          <button onclick="confirmCard()" class="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl mt-2 transition">Запази картата 💾</button>
         </div>
       `;
     }
 
-    function updateStatInput(stat, val) {
-      val = parseInt(val) || 0; cardStats[stat] = val;
-      const total = cardStats.taste + cardStats.speed + cardStats.value;
-      document.getElementById('pts-left').innerText = currentMaxPoints - total;
+    function updateSliders(changedStat) {
+      let t = parseInt(document.getElementById('slider-taste').value);
+      let s = parseInt(document.getElementById('slider-speed').value);
+      let v = parseInt(document.getElementById('slider-value').value);
+
+      let total = t + s + v;
+
+      if (total > currentMaxPoints) {
+        const diff = total - currentMaxPoints;
+        if (changedStat === 'taste') t -= diff;
+        else if (changedStat === 'speed') s -= diff;
+        else if (changedStat === 'value') v -= diff;
+
+        document.getElementById('slider-taste').value = t;
+        document.getElementById('slider-speed').value = s;
+        document.getElementById('slider-value').value = v;
+      }
+
+      cardStats = { taste: t, speed: s, value: v };
+      document.getElementById('val-taste').innerText = t;
+      document.getElementById('val-speed').innerText = s;
+      document.getElementById('val-value').innerText = v;
+      document.getElementById('pts-used').innerText = t + s + v;
     }
 
     function confirmCard() {
-      const total = cardStats.taste + cardStats.speed + cardStats.value;
-      if (total > currentMaxPoints) return showToast('Надвиши точките!', '⚠️');
       myCards[activeCardIndex].stats = { ...cardStats };
       activeCardIndex++;
       renderCardSetup();
@@ -469,8 +536,17 @@
           broadcast({ type: 'DICE_TURN_UPDATE', diceQueue, diceResults }); updateDiceUI();
         } else {
           turnOrder = sorted.map(s => s.name);
-          broadcast({ type: 'INIT_BATTLE', turnOrder });
-          battleTurnIdx = 0; initArenaUI();
+          const summaryStr = sorted.map(s => `${s.name}: ${s.val}`).join(' | ');
+
+          broadcast({ type: 'SHOW_DICE_FINISHED_POPUP', summary: summaryStr });
+          showPopup('🎲 РЕЗУЛТАТИ ОТ ЗАРЧЕТАТА', summaryStr, 'Играта започва след малко...', 3500);
+
+          setTimeout(() => {
+            broadcast({ type: 'INIT_BATTLE', turnOrder });
+            battleTurnIdx = 0;
+            showPopup('⚔️ БИТКАТА ЗАПОЧВА!', 'Подгответе картите си!', 'Рунд 1', 2500);
+            initArenaUI();
+          }, 3500);
         }
       }
     }
@@ -512,7 +588,7 @@
       document.getElementById('my-cards-count').innerText = `Остават: ${myCards.length}`;
 
       if (myCards.length === 0) {
-        container.innerHTML = `<div class="col-span-2 text-xs text-slate-500 italic text-center py-2">Нямаш карти.</div>`;
+        container.innerHTML = `<div class="col-span-2 text-xs text-slate-500 italic text-center py-2">Нямаш повече карти.</div>`;
         return;
       }
 
@@ -542,7 +618,7 @@
       if (playedCardsOnField.length >= players.length) {
         broadcast({ type: 'UPDATE_FIELD', fieldCards: playedCardsOnField, nextTurnIdx });
         updateArenaUI();
-        setTimeout(resolveRoundBattle, 1500);
+        setTimeout(resolveRoundBattle, 1200);
       } else {
         broadcast({ type: 'UPDATE_FIELD', fieldCards: playedCardsOnField, nextTurnIdx });
         battleTurnIdx = nextTurnIdx;
@@ -553,26 +629,70 @@
     function resolveRoundBattle() {
       if (!isHost) return;
 
+      let logs = [];
       let evaluatedCards = playedCardsOnField.map(item => {
         let stats = { ...item.card.stats };
+        let losses = { taste: 0, speed: 0, value: 0 };
+
         playedCardsOnField.forEach(other => {
           if (other.player !== item.player) {
-            stats.taste = Math.max(0, stats.taste - other.card.stats.taste);
-            stats.speed = Math.max(0, stats.speed - other.card.stats.speed);
-            stats.value = Math.max(0, stats.value - other.card.stats.value);
+            losses.taste += other.card.stats.taste;
+            losses.speed += other.card.stats.speed;
+            losses.value += other.card.stats.value;
           }
         });
-        return { player: item.player, card: { name: item.card.name, stats: stats }, power: stats.taste + stats.speed + stats.value };
+
+        let remTaste = Math.max(0, stats.taste - losses.taste);
+        let remSpeed = Math.max(0, stats.speed - losses.speed);
+        let remValue = Math.max(0, stats.value - losses.value);
+
+        let finalPower = remTaste + remSpeed + remValue;
+
+        logs.push({
+          player: item.player,
+          cardName: item.card.name,
+          power: finalPower,
+          details: `🍔:${remTaste} (${stats.taste - losses.taste}) | ⏱️:${remSpeed} | 💰:${remValue}`
+        });
+
+        return { player: item.player, card: { name: item.card.name, stats: { taste: remTaste, speed: remSpeed, value: remValue } }, power: finalPower };
       });
 
       evaluatedCards.sort((a, b) => b.power - a.power);
       const winnerObj = evaluatedCards[0];
 
-      broadcast({ type: 'RESOLVE_ROUND', winner: winnerObj.player, survivingCard: winnerObj.card, nextTurnIdx: battleTurnIdx, newRound: currentRound + 1 });
-      handleRoundResolution(winnerObj.player, winnerObj.card, battleTurnIdx, currentRound + 1);
+      // ТРЯБВА ЛИ ДА СЕ ПРЕМИНЕ КЪМ КРАЙ НА ИГРАТА (ENDGAME)
+      let finalWinner = null;
+      
+      broadcast({ 
+        type: 'RESOLVE_ROUND', 
+        winner: winnerObj.player, 
+        survivingCard: winnerObj.card, 
+        nextTurnIdx: battleTurnIdx, 
+        newRound: currentRound + 1,
+        logs: logs,
+        finalWinner: finalWinner
+      });
+
+      handleRoundResolution(winnerObj.player, winnerObj.card, battleTurnIdx, currentRound + 1, logs, finalWinner);
     }
 
-    function handleRoundResolution(winnerPlayer, survivingCard, nextTurnIdx, newRound) {
+    function handleRoundResolution(winnerPlayer, survivingCard, nextTurnIdx, newRound, logs, finalWinner) {
+      document.getElementById('screen-arena').classList.add('hidden');
+      document.getElementById('screen-round-result').classList.remove('hidden');
+
+      // Показване на подробния лог
+      const logContainer = document.getElementById('battle-log-container');
+      logContainer.innerHTML = logs.map(l => `
+        <div class="bg-slate-800 p-2 rounded border border-slate-700">
+          <div class="flex justify-between items-center font-bold">
+            <span class="text-amber-300">${l.player} ("${l.cardName}")</span>
+            <span class="${l.power > 0 ? 'text-green-400' : 'text-red-400'}">${l.power > 0 ? 'Оцеля 🛡️' : 'Унищожена 💥'}</span>
+          </div>
+          <div class="text-[10px] text-slate-400 mt-1">${l.details}</div>
+        </div>
+      `).join('');
+
       const myPlayedObj = playedCardsOnField.find(p => p.player === myName);
       if (myPlayedObj) myCards = myCards.filter(c => c.name !== myPlayedObj.card.name);
 
@@ -584,11 +704,40 @@
 
       playedCardsOnField = []; battleTurnIdx = nextTurnIdx; currentRound = newRound;
 
-      if (myCards.length === 1 && players.length === 1) declareWinner(myCards[0].name);
-      else updateArenaUI();
+      setTimeout(() => {
+        document.getElementById('screen-round-result').classList.add('hidden');
+
+        // ЕНДГЕЙМ ЛОГИКА: Автоматично редуциране до оставането на 1 карта
+        if (myCards.length > 0) {
+          if (myCards.length === 1 && players.length === 1) {
+            declareWinner(myCards[0].name);
+            return;
+          }
+        }
+
+        // Ако е останал само един играч с карти
+        if (isHost) {
+          checkEndGameCondition();
+        }
+
+        showPopup(`⚔️ РУНД ${currentRound}`, 'Пригответе се за следващата карта!', '', 2000);
+        initArenaUI();
+      }, 4500);
+    }
+
+    function checkEndGameCondition() {
+      // Автоматично унищожение при един останал играч, докато остане само 1 карта
+      if (myCards.length > 1) {
+        showToast(`Унищожена излишна карта: ${myCards[0].name}`, '🔥');
+        myCards.shift();
+      }
+      if (myCards.length === 1) {
+        declareWinner(myCards[0].name);
+      }
     }
 
     function declareWinner(winner) {
+      document.getElementById('screen-round-result').classList.add('hidden');
       document.getElementById('screen-arena').classList.add('hidden');
       document.getElementById('screen-game').classList.add('hidden');
       document.getElementById('screen-winner').classList.remove('hidden');
