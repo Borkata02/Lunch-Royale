@@ -9,15 +9,21 @@
   <style>
     @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     .toast-anim { animation: slideUp 0.3s ease-out forwards; }
+    
+    @keyframes cardPlace {
+      0% { transform: scale(0.5) translateY(-50px); opacity: 0; }
+      100% { transform: scale(1) translateY(0); opacity: 1; }
+    }
+    .card-anim { animation: cardPlace 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
   </style>
 </head>
-<body class="bg-slate-900 text-white min-h-screen flex flex-col items-center justify-center p-4">
+<body class="bg-slate-900 text-white min-h-screen flex flex-col items-center justify-center p-4 select-none">
 
   <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
 
-  <div class="max-w-md w-full bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-700 text-center">
-    <h1 class="text-3xl font-black text-amber-400 mb-2">LUNCH ROYALE ⚔️</h1>
-    <p class="text-slate-400 text-sm mb-6">Битката за обяд в офиса</p>
+  <div class="max-w-md w-full bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-700 text-center relative overflow-hidden">
+    <h1 class="text-3xl font-black text-amber-400 mb-1">LUNCH ROYALE ⚔️</h1>
+    <p class="text-slate-400 text-xs mb-4">Битката за обяд в офиса</p>
 
     <!-- ЕКРАН 1: ВХОД -->
     <div id="screen-setup" class="space-y-4">
@@ -86,13 +92,38 @@
       <button id="start-btn" onclick="startGame()" class="hidden w-full py-3 bg-green-500 hover:bg-green-600 text-slate-950 font-bold rounded-xl transition">ЗАПОЧНИ ПОДГОТОВКАТА 🚀</button>
     </div>
 
-    <!-- ЕКРАН 3: ГЛАСУВАНЕ / АРЕНА / НАСТРОЙКА -->
+    <!-- ЕКРАН 3: ГЛАСУВАНЕ / НАСТРОЙКА НА СТАТИСТИКИ -->
     <div id="screen-game" class="hidden space-y-4">
       <h2 id="game-title" class="text-xl font-bold text-amber-400">Заглавие</h2>
       <div id="options-list" class="space-y-3"></div>
     </div>
 
-    <!-- ЕКРАН 4: ПОБЕДИТЕЛ -->
+    <!-- ЕКРАН 4: ТУРНИРНА АРЕНА (БИТКА) -->
+    <div id="screen-arena" class="hidden space-y-4">
+      <div id="battle-turn-bar" class="bg-amber-500/10 border border-amber-500/30 p-2 rounded-xl text-xs font-bold text-amber-300 flex justify-between items-center">
+        <span>🎲 На ход: <strong id="battle-active-player" class="text-amber-400 underline">...</strong></span>
+        <span id="battle-round-info" class="text-[10px] bg-amber-500/20 px-2 py-0.5 rounded">Рунд 1</span>
+      </div>
+
+      <!-- БОЙНО ПОЛЕ -->
+      <div class="bg-slate-900/80 rounded-xl p-3 border border-slate-700 min-h-[160px] flex flex-col justify-center items-center">
+        <span class="text-[10px] font-bold text-slate-500 uppercase mb-2">⚔️ Арена на сблъсъка</span>
+        <div id="field-cards" class="flex gap-2 justify-center w-full min-h-[100px] items-center">
+          <span id="empty-field-msg" class="text-xs text-slate-600 italic">Очакване за поставяне на карти...</span>
+        </div>
+      </div>
+
+      <!-- ТЕСТЕ НА ИГРАЧА -->
+      <div class="text-left space-y-2">
+        <div class="flex justify-between items-center">
+          <span class="text-xs font-bold text-slate-400 uppercase">Твоите Бойни Карти:</span>
+          <span id="my-cards-count" class="text-[10px] text-amber-400 font-bold"></span>
+        </div>
+        <div id="my-deck-container" class="grid grid-cols-2 gap-2 max-h-[180px] overflow-y-auto p-1"></div>
+      </div>
+    </div>
+
+    <!-- ЕКРАН 5: ПОБЕДИТЕЛ -->
     <div id="screen-winner" class="hidden space-y-4 py-6">
       <span class="text-5xl block animate-bounce">🏆</span>
       <h2 class="text-sm font-bold text-slate-400 uppercase">Днешният победител е:</h2>
@@ -108,19 +139,24 @@
     let myName = '';
     let hostConn = null;
 
-    let players = []; // { name, isHost, ready }
-    let suggestions = []; // { text, author }
+    let players = []; 
+    let suggestions = []; 
     let selectedMode = 'vote';
     let currentTurnIndex = 0;
 
-    // TCG локални данни за играча
+    // TCG локални данни
     let myCards = [];
     let activeCardIndex = 0;
     let pointsPerCard = 10;
     let currentMaxPoints = 10;
     let remainingPoints = 10;
     let cardStats = { taste: 0, speed: 0, value: 0 };
-    let configuredCards = [];
+    
+    // БИТКА СТЕЙТ
+    let turnOrder = []; // Масив с наредбата на играчите след зарчето
+    let battleTurnIdx = 0;
+    let playedCardsOnField = []; // [{ player, card }]
+    let currentRound = 1;
 
     function showToast(message, icon = '✨') {
       const container = document.getElementById('toast-container');
@@ -146,7 +182,7 @@
       peer.on('open', () => {
         isHost = true;
         showLobby(code);
-        players = [{ name: myName, isHost: true, ready: false }];
+        players = [{ name: myName, isHost: true, ready: false, dice: 0 }];
         updatePlayersUI(players);
         document.getElementById('start-btn').classList.remove('hidden');
         showToast('Лобито е създадено!', '🎉');
@@ -269,10 +305,10 @@
 
     function removeSuggestion(index) {
       if (!isHost) return;
-      const removed = suggestions.splice(index, 1);
+      suggestions.splice(index, 1);
       broadcast({ type: 'SUGGESTION_LIST', suggestions, turnIndex: currentTurnIndex });
       updateSuggestionsUI(suggestions);
-      showToast(`Хостът премахна предложен пункт`, '🗑️');
+      showToast(`Премахнато предложение`, '🗑️');
     }
 
     function updateSuggestionsUI(list) {
@@ -297,17 +333,11 @@
 
     function handleHostData(data, conn) {
       if (data.type === 'JOIN') {
-        players.push({ name: data.name, isHost: false, ready: false });
+        players.push({ name: data.name, isHost: false, ready: false, dice: 0 });
         updatePlayersUI(players);
         if (selectedMode === 'tournament') updateTurnUI();
         
-        broadcast({ 
-          type: 'SYNC_ALL', 
-          players: players, 
-          suggestions: suggestions, 
-          mode: selectedMode, 
-          turnIndex: currentTurnIndex 
-        });
+        broadcast({ type: 'SYNC_ALL', players, suggestions, mode: selectedMode, turnIndex: currentTurnIndex });
         showToast(`${data.name} се присъедини!`, '👋');
       } else if (data.type === 'SUGGESTION') {
         processAddSuggestion(data.value, data.author);
@@ -318,6 +348,8 @@
         broadcast({ type: 'PLAYER_LIST', players });
         updatePlayersUI(players);
         checkAllReadyStatus();
+      } else if (data.type === 'PLAY_CARD_ACTION') {
+        processCardPlayed(data.player, data.card);
       }
     }
 
@@ -337,17 +369,23 @@
         updateGameModeUI(data.mode);
         if (data.turnIndex !== undefined) currentTurnIndex = data.turnIndex;
         updateTurnUI();
-        showToast(`Хостът избра режим: ${data.mode}`, '🎮');
       } else if (data.type === 'SUGGESTION_LIST') {
         suggestions = data.suggestions;
         if (data.turnIndex !== undefined) currentTurnIndex = data.turnIndex;
         updateSuggestionsUI(suggestions);
         updateTurnUI();
-        if (data.newItem) showToast(`${data.addedBy} добави: "${data.newItem}"`, '🃏');
       } else if (data.type === 'START_GAME') {
         renderGameUI(data.options, data.mode);
-      } else if (data.type === 'START_BATTLE') {
-        startActualBattle();
+      } else if (data.type === 'INIT_BATTLE_ORDER') {
+        turnOrder = data.turnOrder;
+        battleTurnIdx = 0;
+        initArenaUI();
+      } else if (data.type === 'UPDATE_FIELD') {
+        playedCardsOnField = data.fieldCards;
+        battleTurnIdx = data.nextTurnIdx;
+        updateArenaUI();
+      } else if (data.type === 'RESOLVE_ROUND') {
+        handleRoundResolution(data.winner, data.survivingCard, data.nextTurnIdx, data.newRound);
       }
     }
 
@@ -362,21 +400,20 @@
       
       const list = document.getElementById('options-list');
       if (mode === 'tournament') {
-        // 1. Извличаме САМО картите, които този играч е написал!
-        myCards = options.filter(s => s.author.trim().toLowerCase() === myName.trim().toLowerCase()).map(s => s.text);
+        const authored = options.filter(s => s.author.trim().toLowerCase() === myName.trim().toLowerCase());
+        const cardsToUse = authored.length > 0 ? authored : options;
         
-        // Ако играчът няма собствени карти, взима случайни или общи
-        if (myCards.length === 0) {
-          showToast('Нямаш свои карти, получаваш общи предложения!', 'ℹ️');
-          myCards = options.map(s => s.text);
-        }
+        // Създаваме картите със статистики
+        myCards = cardsToUse.map(s => ({
+          name: s.text,
+          stats: { taste: 0, speed: 0, value: 0 },
+          power: 0
+        }));
 
-        // 2. БАЛАНС: Общият бюджет точки е 40. Изчисляваме точки на карта
         const TOTAL_BUDGET = 40;
         pointsPerCard = Math.floor(TOTAL_BUDGET / myCards.length);
 
         activeCardIndex = 0;
-        configuredCards = [];
         renderCardSetup();
       } else {
         document.getElementById('game-title').innerText = 'Изберете какво ви се яде:';
@@ -387,13 +424,12 @@
     }
 
     function renderCardSetup() {
-      // Когато настройката на всички карти приключи -> Показваме "Изчакващ екран"
       if (activeCardIndex >= myCards.length) {
         setPlayerReady();
         return;
       }
 
-      const cardName = myCards[activeCardIndex];
+      const card = myCards[activeCardIndex];
       currentMaxPoints = pointsPerCard;
       remainingPoints = pointsPerCard;
       cardStats = { taste: 0, speed: 0, value: 0 };
@@ -403,7 +439,7 @@
       document.getElementById('options-list').innerHTML = `
         <div class="bg-slate-700/60 p-4 rounded-xl border border-amber-400/30 text-left space-y-4">
           <div class="flex justify-between items-center">
-            <h3 class="text-lg font-black text-amber-300">📍 ${cardName}</h3>
+            <h3 class="text-lg font-black text-amber-300">📍 ${card.name}</h3>
             <span class="text-xs bg-amber-500/20 text-amber-300 px-2.5 py-1 rounded-md border border-amber-500/30 font-bold">
               Остават: <span id="pts-left">${currentMaxPoints}</span> т.
             </span>
@@ -436,7 +472,7 @@
           </div>
 
           <button onclick="confirmCard()" class="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg transition text-sm">
-            Запази картата (${pointsPerCard}т.) ➡️
+            Запази картата ➡️
           </button>
         </div>
       `;
@@ -445,10 +481,7 @@
     function updateStat(stat, value) {
       val = parseInt(value);
       const currentOtherSum = Object.keys(cardStats).reduce((acc, k) => k === stat ? acc : acc + cardStats[k], 0);
-      
-      if (val + currentOtherSum > currentMaxPoints) {
-        val = currentMaxPoints - currentOtherSum;
-      }
+      if (val + currentOtherSum > currentMaxPoints) val = currentMaxPoints - currentOtherSum;
       
       cardStats[stat] = val;
       remainingPoints = currentMaxPoints - (currentOtherSum + val);
@@ -458,15 +491,17 @@
     }
 
     function confirmCard() {
-      if (remainingPoints > 0) {
-        return showToast(`Разпредели всички ${currentMaxPoints} точки! Остават ${remainingPoints}`, '⚠️');
-      }
-      configuredCards.push({ name: myCards[activeCardIndex], stats: {...cardStats} });
+      if (remainingPoints > 0) return showToast(`Разпредели всички ${currentMaxPoints} точки!`, '⚠️');
+      
+      myCards[activeCardIndex].stats = { ...cardStats };
+      // Изчисляване на Средната Сила (Звезди / HP)
+      const avgPower = (cardStats.taste + cardStats.speed + cardStats.value) / 3;
+      myCards[activeCardIndex].power = parseFloat(avgPower.toFixed(1));
+
       activeCardIndex++;
       renderCardSetup();
     }
 
-    // СТЕЙТ "ГОТОВ"
     function setPlayerReady() {
       if (isHost) {
         const p = players.find(p => p.name.trim().toLowerCase() === myName.trim().toLowerCase());
@@ -476,7 +511,6 @@
       } else {
         hostConn.send({ type: 'PLAYER_READY', name: myName });
       }
-
       renderWaitingLobbyUI();
     }
 
@@ -507,18 +541,16 @@
     function updateReadyListUI() {
       const container = document.getElementById('ready-players-list');
       if (!container) return;
-      
       container.innerHTML = players.map(p => `
         <li class="bg-slate-800 p-2.5 rounded-lg text-xs font-bold flex justify-between items-center border border-slate-700">
           <span>${p.name}</span>
-          ${p.ready ? '<span class="text-green-400 flex items-center gap-1">✅ Готов</span>' : '<span class="text-amber-400 flex items-center gap-1 animate-pulse">⏳ Настройва...</span>'}
+          ${p.ready ? '<span class="text-green-400 font-bold">✅ Готов</span>' : '<span class="text-amber-400 animate-pulse">⏳ Настройва...</span>'}
         </li>
       `).join('');
     }
 
     function checkAllReadyStatus() {
       updateReadyListUI();
-      
       const allReady = players.length > 0 && players.every(p => p.ready);
       
       if (isHost) {
@@ -527,7 +559,7 @@
           if (allReady) {
             btn.disabled = false;
             btn.className = "w-full py-3 bg-green-500 hover:bg-green-600 text-slate-950 font-black rounded-xl transition shadow-lg animate-bounce cursor-pointer";
-            btn.innerText = "ЗАПОЧНИ БИТКАТА ⚔️";
+            btn.innerText = "ХВЪРЛИ ЗАРЧЕТАТА И ЗАПОЧНИ 🎲⚔️";
           } else {
             btn.disabled = true;
             btn.className = "w-full py-3 bg-slate-600 text-slate-400 cursor-not-allowed font-bold rounded-xl transition mt-4";
@@ -537,30 +569,186 @@
       }
     }
 
+    // 🎲 РЕДУВАНЕ СЪС ЗАРЧЕ И БИТКА НА АРЕНАТА
     function hostLaunchBattle() {
       if (!isHost) return;
-      broadcast({ type: 'START_BATTLE' });
-      startActualBattle();
+
+      // 1. Хвърляне на уникално зарче за всеки
+      let diceResults = [];
+      players.forEach(p => {
+        let val;
+        do { val = Math.floor(Math.random() * 100) + 1; } while (diceResults.some(d => d.dice === val));
+        diceResults.push({ name: p.name, dice: val });
+      });
+
+      // Подреждане по най-голямо число
+      diceResults.sort((a, b) => b.dice - a.dice);
+      turnOrder = diceResults.map(d => d.name);
+
+      broadcast({ type: 'INIT_BATTLE_ORDER', turnOrder });
+      battleTurnIdx = 0;
+      initArenaUI();
     }
 
-    function startActualBattle() {
-      document.getElementById('game-title').innerText = '⚔️ БИТКАТА ЗА ОБЯД ЗАПОЧНА!';
+    function initArenaUI() {
+      document.getElementById('screen-game').classList.add('hidden');
+      document.getElementById('screen-arena').classList.remove('hidden');
       
-      // Показваме първата карта за битка
-      const firstCard = configuredCards[0] ? configuredCards[0].name : "Дюнери";
-      document.getElementById('options-list').innerHTML = `
-        <div class="bg-slate-700 p-6 rounded-xl border-2 border-amber-400 text-center space-y-4">
-          <span class="text-5xl block animate-pulse">⚔️</span>
-          <h3 class="text-xl font-black text-amber-300">Първа Битка!</h3>
-          <p class="text-sm font-semibold">Твоята бойна карта на арената: <br><strong class="text-amber-400 text-lg">${firstCard}</strong></p>
-          <button onclick="declareWinner('${firstCard}')" class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl transition">
-            Атакувай опонента! 🔥
-          </button>
-        </div>
-      `;
+      showToast(`Наредба: ${turnOrder.join(' ➡️ ')}`, '🎲');
+      updateArenaUI();
+    }
+
+    function updateArenaUI() {
+      const activePlayerName = turnOrder[battleTurnIdx % turnOrder.length];
+      document.getElementById('battle-active-player').innerText = activePlayerName;
+      document.getElementById('battle-round-info').innerText = `Рунд ${currentRound}`;
+
+      // Показване на картите на арената
+      const fieldContainer = document.getElementById('field-cards');
+      if (playedCardsOnField.length === 0) {
+        fieldContainer.innerHTML = `<span class="text-xs text-slate-600 italic">Очакване за поставяне на карти...</span>`;
+      } else {
+        fieldContainer.innerHTML = playedCardsOnField.map(item => `
+          <div class="card-anim bg-slate-800 border-2 border-amber-400/60 p-2.5 rounded-xl w-36 text-center shadow-lg relative">
+            <span class="text-[9px] bg-indigo-600/40 text-indigo-200 px-1.5 py-0.5 rounded font-bold block mb-1">${item.player}</span>
+            <div class="font-black text-amber-300 text-xs truncate">${item.card.name}</div>
+            <div class="text-[10px] text-slate-300 mt-1">⭐ Сила: <strong class="text-amber-400">${item.card.power}</strong></div>
+          </div>
+        `).join('');
+      }
+
+      // Опресняване на Моето тесте
+      renderMyDeckUI(activePlayerName);
+    }
+
+    function renderMyDeckUI(activePlayerName) {
+      const isMyTurn = activePlayerName.trim().toLowerCase() === myName.trim().toLowerCase();
+      const hasAlreadyPlayed = playedCardsOnField.some(p => p.player.trim().toLowerCase() === myName.trim().toLowerCase());
+
+      document.getElementById('my-cards-count').innerText = `Остават: ${myCards.length}`;
+      const container = document.getElementById('my-deck-container');
+
+      if (myCards.length === 0) {
+        container.innerHTML = `<div class="col-span-2 text-xs text-slate-500 italic text-center py-4">Нямаш останали карти в тестето.</div>`;
+        return;
+      }
+
+      container.innerHTML = myCards.map((card, idx) => {
+        const canClick = isMyTurn && !hasAlreadyPlayed;
+        return `
+          <div class="bg-slate-700/80 p-2.5 rounded-xl border border-slate-600 flex flex-col justify-between text-left space-y-1">
+            <div>
+              <div class="font-bold text-xs text-amber-300 truncate">📍 ${card.name}</div>
+              <div class="text-[10px] text-slate-400 font-semibold">⭐ Сила/HP: <span class="text-amber-400 font-bold">${card.power}</span></div>
+            </div>
+            <button 
+              onclick="playCardFromDeck(${idx})" 
+              ${!canClick ? 'disabled' : ''} 
+              class="w-full py-1.5 text-xs font-bold rounded-lg transition ${canClick ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 cursor-pointer' : 'bg-slate-600 text-slate-400 opacity-50 cursor-not-allowed'}">
+              ${hasAlreadyPlayed ? 'Поставена ⏳' : (isMyTurn ? 'Изиграй ⚔️' : 'Изчакай ред')}
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function playCardFromDeck(cardIndex) {
+      const selectedCard = myCards[cardIndex];
+      
+      if (isHost) {
+        processCardPlayed(myName, selectedCard);
+      } else {
+        hostConn.send({ type: 'PLAY_CARD_ACTION', player: myName, card: selectedCard });
+      }
+    }
+
+    function processCardPlayed(playerName, card) {
+      if (!isHost) return;
+
+      playedCardsOnField.push({ player: playerName, card: card });
+      
+      // Премахваме картата от локалното тесте на играча при Хоста
+      const nextTurnIdx = battleTurnIdx + 1;
+
+      // Проверка дали всички играчи на арената са изиграли карта за рунда
+      if (playedCardsOnField.length >= players.length) {
+        broadcast({ type: 'UPDATE_FIELD', fieldCards: playedCardsOnField, nextTurnIdx });
+        updateArenaUI();
+        
+        setTimeout(() => {
+          resolveRoundBattle();
+        }, 1200);
+      } else {
+        broadcast({ type: 'UPDATE_FIELD', fieldCards: playedCardsOnField, nextTurnIdx });
+        battleTurnIdx = nextTurnIdx;
+        updateArenaUI();
+      }
+    }
+
+    // РЕШАВАНЕ НА РУНДА И ПРЕСМЯТАНЕ НА ЩЕТИТЕ
+    function resolveRoundBattle() {
+      if (!isHost) return;
+
+      // Сортиране по най-висока Сила (Power)
+      playedCardsOnField.sort((a, b) => b.card.power - a.card.power);
+
+      const winnerObj = playedCardsOnField[0];
+      const runnerUpObj = playedCardsOnField[1];
+
+      let remainingPower = winnerObj.card.power;
+      if (runnerUpObj) {
+        remainingPower = parseFloat((winnerObj.card.power - runnerUpObj.card.power).toFixed(1));
+      }
+
+      const survivingCard = {
+        ...winnerObj.card,
+        power: remainingPower
+      };
+
+      const nextTurnIdx = battleTurnIdx;
+      const newRound = currentRound + 1;
+
+      broadcast({
+        type: 'RESOLVE_ROUND',
+        winner: winnerObj.player,
+        survivingCard: survivingCard,
+        nextTurnIdx: nextTurnIdx,
+        newRound: newRound
+      });
+
+      handleRoundResolution(winnerObj.player, survivingCard, nextTurnIdx, newRound);
+    }
+
+    function handleRoundResolution(winnerPlayer, survivingCard, nextTurnIdx, newRound) {
+      const myPlayedObj = playedCardsOnField.find(p => p.player.trim().toLowerCase() === myName.trim().toLowerCase());
+      
+      if (myPlayedObj) {
+        // Премахваме изиграната карта от тестето си
+        myCards = myCards.filter(c => c.name !== myPlayedObj.card.name);
+      }
+
+      // Ако аз съм победителят в рунда и картата ми има остатъчно HP (>0) -> Връщаме я в тестето!
+      if (winnerPlayer.trim().toLowerCase() === myName.trim().toLowerCase() && survivingCard.power > 0) {
+        myCards.push(survivingCard);
+        showToast(`Картата ти "${survivingCard.name}" оцеля с ${survivingCard.power} HP!`, '🛡️');
+      } else {
+        showToast(`Рундът спечели ${winnerPlayer}!`, '⚔️');
+      }
+
+      playedCardsOnField = [];
+      battleTurnIdx = nextTurnIdx;
+      currentRound = newRound;
+
+      // ПРОВЕРКА ЗА КРАЕН ПОБЕДИТЕЛ
+      if (myCards.length === 1 && players.length === 1) {
+        declareWinner(myCards[0].name);
+      } else {
+        updateArenaUI();
+      }
     }
 
     function declareWinner(winner) {
+      document.getElementById('screen-arena').classList.add('hidden');
       document.getElementById('screen-game').classList.add('hidden');
       document.getElementById('screen-winner').classList.remove('hidden');
       document.getElementById('winner-name').innerText = winner;
