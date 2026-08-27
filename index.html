@@ -3,20 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lunch Royale 🍔</title>
+  <title>Lunch Royale ⚔️ TCG</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
-    @keyframes slideUp {
-      from { transform: translateY(100%); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
-    }
+    @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     .toast-anim { animation: slideUp 0.3s ease-out forwards; }
   </style>
 </head>
 <body class="bg-slate-900 text-white min-h-screen flex flex-col items-center justify-center p-4">
 
-  <!-- TOAST ПОП-ЪП ИЗВЕСТИЕ -->
   <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
 
   <div class="max-w-md w-full bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-700 text-center">
@@ -58,7 +54,7 @@
         </div>
       </div>
 
-      <!-- ИЗБОР НА ГЕЙМ МОД (ВИДИМ ЗА ВСИЧКИ, НО САМО ХОСТА КЛИКА) -->
+      <!-- ИЗБОР НА ГЕЙМ МОД -->
       <div class="text-left space-y-1">
         <label class="text-xs font-bold text-slate-400 uppercase">Изберете режим на битка:</label>
         <div class="grid grid-cols-3 gap-2">
@@ -79,12 +75,17 @@
         <ul id="players-list" class="space-y-2"></ul>
       </div>
 
-      <!-- ВЪВЕЖДАНЕ И СПИСЪК НА ПРЕДЛОЖЕНИЯТА -->
+      <!-- ИЗВЕСТИЕ ЗА РЕДУВАНЕ В ТУРНИР -->
+      <div id="turn-indicator" class="hidden bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-xl text-xs font-bold text-amber-300 text-center animate-pulse">
+        ⏳ На ход е: <span id="current-turn-player">...</span>
+      </div>
+
+      <!-- ВЪВЕЖДАНЕ НА ПРЕДЛОЖЕНИЯ -->
       <div class="space-y-2 pt-2 border-t border-slate-700 text-left">
-        <label class="text-xs font-bold text-slate-400 uppercase">Предложения за обяд:</label>
+        <label class="text-xs font-bold text-slate-400 uppercase">Предложения за обяд (Карти):</label>
         <div class="flex space-x-2">
           <input id="suggestion-input" type="text" placeholder="напр. Дюнери, Суши..." class="flex-1 p-2.5 rounded-lg bg-slate-700 border border-slate-600 text-sm focus:outline-none focus:border-amber-400">
-          <button onclick="submitSuggestion()" class="px-4 bg-slate-600 hover:bg-slate-500 text-xs font-bold rounded-lg transition">Добави</button>
+          <button id="add-btn" onclick="submitSuggestion()" class="px-4 bg-slate-600 hover:bg-slate-500 text-xs font-bold rounded-lg transition">Добави</button>
         </div>
         <!-- СПИСЪК С ЧИПОВЕ -->
         <div id="suggestions-container" class="flex flex-wrap gap-1.5 pt-1 min-h-[30px]">
@@ -95,7 +96,7 @@
       <button id="start-btn" onclick="startGame()" class="hidden w-full py-3 bg-green-500 hover:bg-green-600 text-slate-950 font-bold rounded-xl transition">ЗАПОЧНИ БИТКАТА 🚀</button>
     </div>
 
-    <!-- ЕКРАН 3: ГЛАСУВАНЕ -->
+    <!-- ЕКРАН 3: ГЛАСУВАНЕ / АРЕНА -->
     <div id="screen-game" class="hidden space-y-4">
       <h2 id="game-title" class="text-xl font-bold text-amber-400">Изберете какво ви се яде:</h2>
       <div id="options-list" class="space-y-2"></div>
@@ -119,10 +120,9 @@
 
     let players = [];
     let suggestions = [];
-    let votes = {};
-    let selectedMode = 'vote'; // 'vote', 'wheel', 'tournament'
+    let selectedMode = 'vote';
+    let currentTurnIndex = 0;
 
-    // ПОП-ЪП ИЗВЕСТИЯ (TOASTS)
     function showToast(message, icon = '✨') {
       const container = document.getElementById('toast-container');
       const toast = document.createElement('div');
@@ -185,10 +185,7 @@
     }
 
     function selectGameMode(mode) {
-      if (!isHost) {
-        showToast('Само Хостът може да сменя режима!', '🔒');
-        return;
-      }
+      if (!isHost) return showToast('Само Хостът може да сменя режима!', '🔒');
       selectedMode = mode;
       updateGameModeUI(mode);
       broadcast({ type: 'MODE_CHANGE', mode: mode });
@@ -198,11 +195,20 @@
       selectedMode = mode;
       document.querySelectorAll('.mode-btn').forEach(b => b.classList.replace('border-amber-400', 'border-transparent'));
       document.getElementById('mode-' + mode).classList.replace('border-transparent', 'border-amber-400');
+
+      const turnInd = document.getElementById('turn-indicator');
+      if (mode === 'tournament') {
+        turnInd.classList.remove('hidden');
+        updateTurnUI();
+      } else {
+        turnInd.classList.add('hidden');
+      }
     }
 
     function addPlayerToList(name, isHostPlayer) {
       players.push({ name, isHost: isHostPlayer });
       updatePlayersUI(players);
+      if (selectedMode === 'tournament') updateTurnUI();
     }
 
     function updatePlayersUI(list) {
@@ -215,26 +221,62 @@
       `).join('');
     }
 
+    function updateTurnUI() {
+      if (players.length === 0) return;
+      const currentPlayer = players[currentTurnIndex % players.length].name;
+      document.getElementById('current-turn-player').innerText = currentPlayer;
+    }
+
     function submitSuggestion() {
       const input = document.getElementById('suggestion-input');
       const val = input.value.trim();
       if (!val) return;
 
+      // Проверка за редуване при Турнир
+      if (selectedMode === 'tournament') {
+        const activePlayer = players[currentTurnIndex % players.length].name;
+        if (myName !== activePlayer) {
+          showToast(`Не си на ход! Чакай ${activePlayer}`, '⏳');
+          return;
+        }
+      }
+
       if (isHost) {
-        addSuggestion(val, myName);
+        processAddSuggestion(val, myName);
       } else {
         hostConn.send({ type: 'SUGGESTION', value: val, author: myName });
       }
       input.value = '';
     }
 
-    function addSuggestion(val, author) {
-      if (!suggestions.includes(val)) {
-        suggestions.push(val);
-        updateSuggestionsUI(suggestions);
-        broadcast({ type: 'SUGGESTION_LIST', suggestions: suggestions, addedBy: author, newItem: val });
-        showToast(`${author} добави: "${val}"`, '🍔');
+    function processAddSuggestion(val, author) {
+      // CASE-INSENSITIVE ПРОВЕРКА ЗА ДУБЛИКАТИ
+      const normalized = val.toLowerCase().trim();
+      const exists = suggestions.some(s => s.toLowerCase().trim() === normalized);
+
+      if (exists) {
+        if (author === myName) showToast(`"${val}" вече съществува!`, '⚠️');
+        return;
       }
+
+      suggestions.push(val);
+      if (selectedMode === 'tournament') {
+        currentTurnIndex++;
+      }
+
+      broadcast({ type: 'SUGGESTION_LIST', suggestions, addedBy: author, newItem: val, turnIndex: currentTurnIndex });
+      updateSuggestionsUI(suggestions);
+      if (selectedMode === 'tournament') updateTurnUI();
+      showToast(`${author} добави карта: "${val}"`, '🃏');
+    }
+
+    // ИЗТРИВАНЕ НА ПРЕДЛОЖЕНИЕ (САМО ЗА ХОСТА)
+    function removeSuggestion(index) {
+      if (!isHost) return;
+      const removed = suggestions.splice(index, 1);
+      broadcast({ type: 'SUGGESTION_LIST', suggestions, turnIndex: currentTurnIndex });
+      updateSuggestionsUI(suggestions);
+      showToast(`Хостът премахна "${removed}"`, '🗑️');
     }
 
     function updateSuggestionsUI(list) {
@@ -243,56 +285,32 @@
         container.innerHTML = `<span class="text-xs text-slate-500 italic">Все още няма добавени места...</span>`;
         return;
       }
-      container.innerHTML = list.map(s => `
-        <span class="bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 px-2.5 py-1 rounded-lg text-xs font-bold animate-fade-in flex items-center gap-1">
+      container.innerHTML = list.map((s, idx) => `
+        <span class="bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5">
           📍 ${s}
+          ${isHost ? `<button onclick="removeSuggestion(${idx})" class="text-red-400 hover:text-red-300 font-bold ml-1">✕</button>` : ''}
         </span>
       `).join('');
     }
 
     function startGame() {
-      if (suggestions.length === 0) return showToast('Добавете поне 1 място!', '⚠️');
+      if (suggestions.length === 0) return showToast('Добавете поне 1 карта!', '⚠️');
       broadcast({ type: 'START_GAME', options: suggestions, mode: selectedMode });
       renderGameUI(suggestions, selectedMode);
     }
 
-    function vote(option) {
-      if (isHost) {
-        votes[myName] = option;
-        checkVotes();
-      } else {
-        hostConn.send({ type: 'VOTE', option, player: myName });
-        document.getElementById('screen-game').innerHTML = '<p class="text-amber-400 font-bold p-6">Гласът е записан! Чакаме останалите...</p>';
-      }
-      showToast(`Гласува за "${option}"`, '✅');
-    }
-
-    // ЛОГИКА НА ХОСТА
+    // ХОСТ HANDLER
     function handleHostData(data, conn) {
       if (data.type === 'JOIN') {
         addPlayerToList(data.name, false);
         broadcast({ type: 'PLAYER_LIST', players });
         showToast(`${data.name} се присъедини!`, '👋');
       } else if (data.type === 'SUGGESTION') {
-        addSuggestion(data.value, data.author);
-      } else if (data.type === 'VOTE') {
-        votes[data.player] = data.option;
-        checkVotes();
+        processAddSuggestion(data.value, data.author);
       }
     }
 
-    function checkVotes() {
-      if (Object.keys(votes).length >= players.length) {
-        const counts = {};
-        Object.values(votes).forEach(opt => counts[opt] = (counts[opt] || 0) + 1);
-        
-        let winner = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
-        broadcast({ type: 'WINNER', winner });
-        renderWinner(winner);
-      }
-    }
-
-    // ЛОГИКА НА КЛИЕНТА
+    // КЛИЕНТ HANDLER
     function handleClientData(data) {
       if (data.type === 'PLAYER_LIST') {
         updatePlayersUI(data.players);
@@ -301,12 +319,12 @@
         showToast(`Хостът избра режим: ${data.mode}`, '🎮');
       } else if (data.type === 'SUGGESTION_LIST') {
         suggestions = data.suggestions;
+        currentTurnIndex = data.turnIndex || 0;
         updateSuggestionsUI(suggestions);
-        if (data.newItem) showToast(`${data.addedBy} добави: "${data.newItem}"`, '🍔');
+        if (selectedMode === 'tournament') updateTurnUI();
+        if (data.newItem) showToast(`${data.addedBy} добави: "${data.newItem}"`, '🃏');
       } else if (data.type === 'START_GAME') {
         renderGameUI(data.options, data.mode);
-      } else if (data.type === 'WINNER') {
-        renderWinner(data.winner);
       }
     }
 
@@ -319,32 +337,16 @@
       document.getElementById('screen-game').classList.remove('hidden');
       
       const list = document.getElementById('options-list');
-
-      if (mode === 'wheel') {
-        // Колело - теглене на произволен победител (за MVP)
-        document.getElementById('game-title').innerText = '🎡 Колелото се върти...';
-        list.innerHTML = `<div class="p-8 text-2xl font-bold text-amber-400 animate-pulse">Завъртане...</div>`;
-        if (isHost) {
-          setTimeout(() => {
-            const randomWinner = options[Math.floor(Math.random() * options.length)];
-            broadcast({ type: 'WINNER', winner: randomWinner });
-            renderWinner(randomWinner);
-          }, 3000);
-        }
+      if (mode === 'tournament') {
+        document.getElementById('game-title').innerText = '⚔️ Турнирна Арена (Подготовка)';
+        list.innerHTML = `<div class="p-6 bg-slate-700/50 rounded-xl text-amber-300 font-bold text-sm">Картите са раздадени! Готови за разпределение на точките...</div>`;
       } else {
-        // Стандартно гласуване
         document.getElementById('game-title').innerText = 'Изберете какво ви се яде:';
         list.innerHTML = options.map(opt => `
-          <button onclick="vote('${opt}')" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 font-bold rounded-xl transition">${opt}</button>
+          <button class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 font-bold rounded-xl transition">${opt}</button>
         `).join('');
       }
     }
-
-    function renderWinner(winner) {
-      document.getElementById('screen-game').classList.add('hidden');
-      document.getElementById('screen-winner').classList.remove('hidden');
-      document.getElementById('winner-name').innerText = winner;
-    }
   </script>
 </body>
-</html> 
+</html>
