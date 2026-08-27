@@ -147,7 +147,8 @@
       peer.on('open', () => {
         isHost = true;
         showLobby(code);
-        addPlayerToList(myName, true);
+        players = [{ name: myName, isHost: true }];
+        updatePlayersUI(players);
         document.getElementById('start-btn').classList.remove('hidden');
         showToast('Лобито е създадено!', '🎉');
       });
@@ -188,7 +189,7 @@
       if (!isHost) return showToast('Само Хостът може да сменя режима!', '🔒');
       selectedMode = mode;
       updateGameModeUI(mode);
-      broadcast({ type: 'MODE_CHANGE', mode: mode });
+      broadcast({ type: 'MODE_CHANGE', mode: mode, turnIndex: currentTurnIndex });
     }
 
     function updateGameModeUI(mode) {
@@ -203,12 +204,6 @@
       } else {
         turnInd.classList.add('hidden');
       }
-    }
-
-    function addPlayerToList(name, isHostPlayer) {
-      players.push({ name, isHost: isHostPlayer });
-      updatePlayersUI(players);
-      if (selectedMode === 'tournament') updateTurnUI();
     }
 
     function updatePlayersUI(list) {
@@ -232,10 +227,11 @@
       const val = input.value.trim();
       if (!val) return;
 
-      // Проверка за редуване при Турнир
       if (selectedMode === 'tournament') {
+        if (players.length === 0) return;
         const activePlayer = players[currentTurnIndex % players.length].name;
-        if (myName !== activePlayer) {
+        
+        if (myName.trim().toLowerCase() !== activePlayer.trim().toLowerCase()) {
           showToast(`Не си на ход! Чакай ${activePlayer}`, '⏳');
           return;
         }
@@ -250,7 +246,6 @@
     }
 
     function processAddSuggestion(val, author) {
-      // CASE-INSENSITIVE ПРОВЕРКА ЗА ДУБЛИКАТИ
       const normalized = val.toLowerCase().trim();
       const exists = suggestions.some(s => s.toLowerCase().trim() === normalized);
 
@@ -270,7 +265,6 @@
       showToast(`${author} добави карта: "${val}"`, '🃏');
     }
 
-    // ИЗТРИВАНЕ НА ПРЕДЛОЖЕНИЕ (САМО ЗА ХОСТА)
     function removeSuggestion(index) {
       if (!isHost) return;
       const removed = suggestions.splice(index, 1);
@@ -299,29 +293,48 @@
       renderGameUI(suggestions, selectedMode);
     }
 
-    // ХОСТ HANDLER
     function handleHostData(data, conn) {
       if (data.type === 'JOIN') {
-        addPlayerToList(data.name, false);
-        broadcast({ type: 'PLAYER_LIST', players });
+        players.push({ name: data.name, isHost: false });
+        updatePlayersUI(players);
+        if (selectedMode === 'tournament') updateTurnUI();
+        
+        // Изпращаме на новия играч ВСИЧКО от текущата сесия
+        broadcast({ 
+          type: 'SYNC_ALL', 
+          players: players, 
+          suggestions: suggestions, 
+          mode: selectedMode, 
+          turnIndex: currentTurnIndex 
+        });
         showToast(`${data.name} се присъедини!`, '👋');
       } else if (data.type === 'SUGGESTION') {
         processAddSuggestion(data.value, data.author);
       }
     }
 
-    // КЛИЕНТ HANDLER
     function handleClientData(data) {
-      if (data.type === 'PLAYER_LIST') {
-        updatePlayersUI(data.players);
+      if (data.type === 'SYNC_ALL') {
+        players = data.players;
+        suggestions = data.suggestions;
+        currentTurnIndex = data.turnIndex;
+        updatePlayersUI(players);
+        updateSuggestionsUI(suggestions);
+        updateGameModeUI(data.mode);
+      } else if (data.type === 'PLAYER_LIST') {
+        players = data.players;
+        updatePlayersUI(players);
+        if (selectedMode === 'tournament') updateTurnUI();
       } else if (data.type === 'MODE_CHANGE') {
         updateGameModeUI(data.mode);
+        if (data.turnIndex !== undefined) currentTurnIndex = data.turnIndex;
+        updateTurnUI();
         showToast(`Хостът избра режим: ${data.mode}`, '🎮');
       } else if (data.type === 'SUGGESTION_LIST') {
         suggestions = data.suggestions;
-        currentTurnIndex = data.turnIndex || 0;
+        if (data.turnIndex !== undefined) currentTurnIndex = data.turnIndex;
         updateSuggestionsUI(suggestions);
-        if (selectedMode === 'tournament') updateTurnUI();
+        updateTurnUI();
         if (data.newItem) showToast(`${data.addedBy} добави: "${data.newItem}"`, '🃏');
       } else if (data.type === 'START_GAME') {
         renderGameUI(data.options, data.mode);
