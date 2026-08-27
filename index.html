@@ -54,19 +54,12 @@
         </div>
       </div>
 
-      <!-- ИЗБОР НА ГЕЙМ МОД -->
       <div class="text-left space-y-1">
         <label class="text-xs font-bold text-slate-400 uppercase">Изберете режим на битка:</label>
         <div class="grid grid-cols-3 gap-2">
-          <button id="mode-vote" onclick="selectGameMode('vote')" class="mode-btn p-2 rounded-xl bg-slate-700 border-2 border-amber-400 text-xs font-bold text-center transition">
-            🗳️ Гласуване
-          </button>
-          <button id="mode-wheel" onclick="selectGameMode('wheel')" class="mode-btn p-2 rounded-xl bg-slate-700 border-2 border-transparent text-xs font-bold text-center transition">
-            🎡 Колело
-          </button>
-          <button id="mode-tournament" onclick="selectGameMode('tournament')" class="mode-btn p-2 rounded-xl bg-slate-700 border-2 border-transparent text-xs font-bold text-center transition">
-            ⚔️ Турнир
-          </button>
+          <button id="mode-vote" onclick="selectGameMode('vote')" class="mode-btn p-2 rounded-xl bg-slate-700 border-2 border-amber-400 text-xs font-bold text-center transition">🗳️ Гласуване</button>
+          <button id="mode-wheel" onclick="selectGameMode('wheel')" class="mode-btn p-2 rounded-xl bg-slate-700 border-2 border-transparent text-xs font-bold text-center transition">🎡 Колело</button>
+          <button id="mode-tournament" onclick="selectGameMode('tournament')" class="mode-btn p-2 rounded-xl bg-slate-700 border-2 border-transparent text-xs font-bold text-center transition">⚔️ Турнир</button>
         </div>
       </div>
 
@@ -75,19 +68,16 @@
         <ul id="players-list" class="space-y-2"></ul>
       </div>
 
-      <!-- ИЗВЕСТИЕ ЗА РЕДУВАНЕ В ТУРНИР -->
       <div id="turn-indicator" class="hidden bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-xl text-xs font-bold text-amber-300 text-center animate-pulse">
         ⏳ На ход е: <span id="current-turn-player">...</span>
       </div>
 
-      <!-- ВЪВЕЖДАНЕ НА ПРЕДЛОЖЕНИЯ -->
       <div class="space-y-2 pt-2 border-t border-slate-700 text-left">
         <label class="text-xs font-bold text-slate-400 uppercase">Предложения за обяд (Карти):</label>
         <div class="flex space-x-2">
           <input id="suggestion-input" type="text" placeholder="напр. Дюнери, Суши..." class="flex-1 p-2.5 rounded-lg bg-slate-700 border border-slate-600 text-sm focus:outline-none focus:border-amber-400">
           <button id="add-btn" onclick="submitSuggestion()" class="px-4 bg-slate-600 hover:bg-slate-500 text-xs font-bold rounded-lg transition">Добави</button>
         </div>
-        <!-- СПИСЪК С ЧИПОВЕ -->
         <div id="suggestions-container" class="flex flex-wrap gap-1.5 pt-1 min-h-[30px]">
           <span class="text-xs text-slate-500 italic">Все още няма добавени места...</span>
         </div>
@@ -99,7 +89,7 @@
     <!-- ЕКРАН 3: ГЛАСУВАНЕ / АРЕНА -->
     <div id="screen-game" class="hidden space-y-4">
       <h2 id="game-title" class="text-xl font-bold text-amber-400">Изберете какво ви се яде:</h2>
-      <div id="options-list" class="space-y-2"></div>
+      <div id="options-list" class="space-y-3"></div>
     </div>
 
     <!-- ЕКРАН 4: ПОБЕДИТЕЛ -->
@@ -122,6 +112,11 @@
     let suggestions = [];
     let selectedMode = 'vote';
     let currentTurnIndex = 0;
+
+    let myCards = [];
+    let activeCardIndex = 0;
+    let remainingPoints = 10;
+    let cardStats = { taste: 0, speed: 0, value: 0 };
 
     function showToast(message, icon = '✨') {
       const container = document.getElementById('toast-container');
@@ -299,7 +294,6 @@
         updatePlayersUI(players);
         if (selectedMode === 'tournament') updateTurnUI();
         
-        // Изпращаме на новия играч ВСИЧКО от текущата сесия
         broadcast({ 
           type: 'SYNC_ALL', 
           players: players, 
@@ -345,20 +339,113 @@
       connections.forEach(c => c.send(data));
     }
 
+    // РЕНДЕРВАНЕ НА ИГРАТА
     function renderGameUI(options, mode) {
       document.getElementById('screen-lobby').classList.add('hidden');
       document.getElementById('screen-game').classList.remove('hidden');
       
       const list = document.getElementById('options-list');
       if (mode === 'tournament') {
-        document.getElementById('game-title').innerText = '⚔️ Турнирна Арена (Подготовка)';
-        list.innerHTML = `<div class="p-6 bg-slate-700/50 rounded-xl text-amber-300 font-bold text-sm">Картите са раздадени! Готови за разпределение на точките...</div>`;
+        myCards = [...options];
+        activeCardIndex = 0;
+        renderCardSetup();
       } else {
         document.getElementById('game-title').innerText = 'Изберете какво ви се яде:';
         list.innerHTML = options.map(opt => `
-          <button class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 font-bold rounded-xl transition">${opt}</button>
+          <button onclick="declareWinner('${opt}')" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 font-bold rounded-xl transition">${opt}</button>
         `).join('');
       }
+    }
+
+    function renderCardSetup() {
+      if (activeCardIndex >= myCards.length) {
+        document.getElementById('game-title').innerText = '⚔️ Готов за Битка!';
+        document.getElementById('options-list').innerHTML = `
+          <div class="bg-slate-700/50 p-6 rounded-xl text-center space-y-3 border border-slate-600">
+            <span class="text-4xl block">🛡️</span>
+            <p class="text-amber-300 font-bold text-sm">Твоите карти са подготвени за битка!</p>
+            <p class="text-xs text-slate-400">Изчакай опонентите да приключат с точките си...</p>
+            <button onclick="declareWinner(myCards[0])" class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl transition">Започни Сблъсъка ⚔️</button>
+          </div>
+        `;
+        return;
+      }
+
+      const cardName = myCards[activeCardIndex];
+      remainingPoints = 10;
+      cardStats = { taste: 0, speed: 0, value: 0 };
+
+      document.getElementById('game-title').innerText = `🃏 Настройка на карта (${activeCardIndex + 1}/${myCards.length})`;
+      
+      document.getElementById('options-list').innerHTML = `
+        <div class="bg-slate-700/60 p-4 rounded-xl border border-amber-400/30 text-left space-y-4">
+          <div class="flex justify-between items-center">
+            <h3 class="text-lg font-black text-amber-300">📍 ${cardName}</h3>
+            <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-1 rounded-md border border-amber-500/30 font-bold">
+              Остават: <span id="pts-left">10</span> т.
+            </span>
+          </div>
+
+          <div class="space-y-3">
+            <div>
+              <div class="flex justify-between text-xs font-bold mb-1">
+                <span>🍔 Вкус (Taste)</span>
+                <span id="val-taste">0</span>
+              </div>
+              <input type="range" min="0" max="10" value="0" oninput="updateStat('taste', this.value)" class="w-full accent-amber-400 bg-slate-600">
+            </div>
+
+            <div>
+              <div class="flex justify-between text-xs font-bold mb-1">
+                <span>⏱️ Бързина (Speed)</span>
+                <span id="val-speed">0</span>
+              </div>
+              <input type="range" min="0" max="10" value="0" oninput="updateStat('speed', this.value)" class="w-full accent-amber-400 bg-slate-600">
+            </div>
+
+            <div>
+              <div class="flex justify-between text-xs font-bold mb-1">
+                <span>💰 Изгодна цена (Value)</span>
+                <span id="val-value">0</span>
+              </div>
+              <input type="range" min="0" max="10" value="0" oninput="updateStat('value', this.value)" class="w-full accent-amber-400 bg-slate-600">
+            </div>
+          </div>
+
+          <button onclick="confirmCard()" class="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg transition text-sm">
+            Запази картата ➡️
+          </button>
+        </div>
+      `;
+    }
+
+    function updateStat(stat, value) {
+      val = parseInt(value);
+      const currentOtherSum = Object.keys(cardStats).reduce((acc, k) => k === stat ? acc : acc + cardStats[k], 0);
+      
+      if (val + currentOtherSum > 10) {
+        val = 10 - currentOtherSum;
+      }
+      
+      cardStats[stat] = val;
+      remainingPoints = 10 - (currentOtherSum + val);
+
+      document.getElementById('pts-left').innerText = remainingPoints;
+      document.getElementById('val-' + stat).innerText = val;
+    }
+
+    function confirmCard() {
+      if (remainingPoints > 0) {
+        return showToast(`Разпредели всички 10 точки! Остават ${remainingPoints}`, '⚠️');
+      }
+      activeCardIndex++;
+      renderCardSetup();
+    }
+
+    function declareWinner(winner) {
+      document.getElementById('screen-game').classList.add('hidden');
+      document.getElementById('screen-winner').classList.remove('hidden');
+      document.getElementById('winner-name').innerText = winner;
     }
   </script>
 </body>
